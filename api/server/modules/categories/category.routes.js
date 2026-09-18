@@ -3,7 +3,7 @@ import { requireRoles } from '../../middleware/auth.js'
 import { createCategoryService } from './category.service.js'
 import { createCategorySchema, idParamSchema, moveCategorySchema, treeQuerySchema, updateCategorySchema } from './category.validation.js'
 
-const adminOnly = requireRoles('ADMIN', 'CATEGORY_ADMIN')
+const adminOnly = requireRoles('ADMIN')
 
 export function categoryRoutes(prisma) {
   const router = Router()
@@ -11,12 +11,12 @@ export function categoryRoutes(prisma) {
 
   router.get('/', async (req, res) => {
     const query = treeQuerySchema.parse(req.query)
-    res.json({ data: await service.tree(query) })
+    res.json({ data: await service.tree(query, req.user.role) })
   })
 
   router.get('/:id', async (req, res) => {
     const { id } = idParamSchema.parse(req.params)
-    res.json({ data: await service.details(id) })
+    res.json({ data: await service.details(id, req.user.role) })
   })
 
   router.post('/', adminOnly, async (req, res) => {
@@ -48,4 +48,3 @@ export function categoryRoutes(prisma) {
 
   return router
 }
-

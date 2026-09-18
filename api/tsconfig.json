@@ -1,12 +1,18 @@
 {
   "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
     "target": "ES2023",
     "types": ["node"],
-    "strict": true,
+    "strict": false,
+    "noImplicitAny": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "ignoreDeprecations": "6.0"
-  }
+  },
+  "include": ["server/**/*.js", "server/**/*.d.ts"],
+  "exclude": ["dist", "node_modules"]
 }

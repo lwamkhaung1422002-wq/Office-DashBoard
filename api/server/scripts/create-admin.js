@@ -13,8 +13,8 @@ if (!email || !password || password.length < 12) {
   const passwordHash = await bcrypt.hash(password, 12)
   const user = await prisma.user.upsert({
     where: { email },
-    update: { name, passwordHash, role: 'ADMIN', isActive: true },
-    create: { email, name, passwordHash, role: 'ADMIN' },
+    update: { name, passwordHash, role: 'ADMIN', isActive: true, mustChangePassword: false },
+    create: { email, name, passwordHash, role: 'ADMIN', isActive: true, mustChangePassword: false },
     select: { id: true, email: true, name: true, role: true },
   })
   console.log(`Administrator ready: ${user.email}`)

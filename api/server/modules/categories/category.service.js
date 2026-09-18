@@ -1,4 +1,6 @@
 import { DomainError, notFound } from '../../lib/errors.js'
+import { allowedAccessLevels } from '../../lib/access.js'
+import { createAuditService } from '../../lib/audit.js'
 
 const activeWhere = { archivedAt: null }
 const clean = category => ({
@@ -12,16 +14,11 @@ const clean = category => ({
   updatedAt: category.updatedAt,
 })
 
-async function siblingExists(db, { name, parentId, excludeId }) {
+async function siblingExists(db, { name, parentId, excludeId = undefined }) {
   return db.category.findFirst({
     where: { name: { equals: name, mode: 'insensitive' }, parentId: parentId ?? null, id: excludeId ? { not: excludeId } : undefined },
     select: { id: true },
   })
-}
-
-async function audit(db, action, categoryId, actorId, before, after) {
-  const json = value => value == null ? value : JSON.parse(JSON.stringify(value))
-  await db.auditLog.create({ data: { action, entityType: 'Category', entityId: categoryId, actorId, before: json(before), after: json(after) } })
 }
 
 function assembleTree(categories, dataCounts, documentCounts) {
@@ -65,12 +62,13 @@ function filterTree(nodes, query) {
   })
 }
 
-async function loadHierarchy(db, includeArchived = false) {
+async function loadHierarchy(db, includeArchived = false, role) {
   const where = includeArchived ? {} : activeWhere
+  const contentWhere = { ...activeWhere, ...(role ? { accessLevel: { in: allowedAccessLevels(role) } } : {}) }
   const [categories, dataGroups, documentGroups] = await Promise.all([
     db.category.findMany({ where }),
-    db.dataRecord.groupBy({ by: ['categoryId'], where: activeWhere, _count: { _all: true } }),
-    db.document.groupBy({ by: ['categoryId'], where: activeWhere, _count: { _all: true } }),
+    db.dataRecord.groupBy({ by: ['categoryId'], where: contentWhere, _count: { _all: true } }),
+    db.document.groupBy({ by: ['categoryId'], where: contentWhere, _count: { _all: true } }),
   ])
   return assembleTree(
     categories,
@@ -81,15 +79,15 @@ async function loadHierarchy(db, includeArchived = false) {
 
 export function createCategoryService(prisma) {
   return {
-    async tree({ search = '', includeArchived = false } = {}) {
-      const { roots } = await loadHierarchy(prisma, includeArchived)
+    async tree({ search = '', includeArchived = false } = {}, role) {
+      const { roots } = await loadHierarchy(prisma, includeArchived, role)
       return filterTree(roots, search)
     },
 
-    async details(id) {
+    async details(id, role) {
       const record = await prisma.category.findUnique({ where: { id } })
       if (!record) throw notFound('Category')
-      const { roots, byId } = await loadHierarchy(prisma, Boolean(record.archivedAt))
+      const { roots, byId } = await loadHierarchy(prisma, Boolean(record.archivedAt), role)
       const selected = byId.get(id)
       if (!selected) throw notFound('Category')
       const breadcrumb = []
@@ -114,7 +112,7 @@ export function createCategoryService(prisma) {
           throw new DomainError(409, 'DUPLICATE_CATEGORY', 'A category with this name already exists in the selected location')
         }
         const category = await tx.category.create({ data: { ...input, parentId: input.parentId ?? null, createdById: actorId } })
-        await audit(tx, 'CATEGORY_CREATED', category.id, actorId, null, clean(category))
+        await createAuditService(tx).record({ action: 'CATEGORY_CREATED', entityType: 'Category', entityId: category.id, actorId, before: null, after: clean(category) })
         return clean(category)
       })
     },
@@ -127,7 +125,7 @@ export function createCategoryService(prisma) {
           throw new DomainError(409, 'DUPLICATE_CATEGORY', 'A category with this name already exists in the selected location')
         }
         const updated = await tx.category.update({ where: { id }, data: input })
-        await audit(tx, 'CATEGORY_UPDATED', id, actorId, clean(current), clean(updated))
+        await createAuditService(tx).record({ action: 'CATEGORY_UPDATED', entityType: 'Category', entityId: id, actorId, before: clean(current), after: clean(updated) })
         return clean(updated)
       })
     },
@@ -152,7 +150,7 @@ export function createCategoryService(prisma) {
           throw new DomainError(409, 'DUPLICATE_CATEGORY', 'A category with this name already exists in the selected location')
         }
         const updated = await tx.category.update({ where: { id }, data: { parentId } })
-        await audit(tx, 'CATEGORY_MOVED', id, actorId, { parentId: current.parentId }, { parentId, parentName: parent?.name ?? null })
+        await createAuditService(tx).record({ action: 'CATEGORY_MOVED', entityType: 'Category', entityId: id, actorId, before: { parentId: current.parentId }, after: { parentId, parentName: parent?.name ?? null } })
         return clean(updated)
       })
     },
@@ -171,7 +169,7 @@ export function createCategoryService(prisma) {
           throw new DomainError(409, 'CATEGORY_NOT_EMPTY', 'Move or archive active child categories, data, and documents before archiving this category', { children, dataRecords, documents })
         }
         const updated = await tx.category.update({ where: { id }, data: { archivedAt: new Date() } })
-        await audit(tx, 'CATEGORY_ARCHIVED', id, actorId, clean(category), clean(updated))
+        await createAuditService(tx).record({ action: 'CATEGORY_ARCHIVED', entityType: 'Category', entityId: id, actorId, before: clean(category), after: clean(updated) })
         return clean(updated)
       })
     },
@@ -189,7 +187,7 @@ export function createCategoryService(prisma) {
           throw new DomainError(409, 'DUPLICATE_CATEGORY', 'An active category with this name already exists in the selected location')
         }
         const updated = await tx.category.update({ where: { id }, data: { archivedAt: null } })
-        await audit(tx, 'CATEGORY_RESTORED', id, actorId, clean(category), clean(updated))
+        await createAuditService(tx).record({ action: 'CATEGORY_RESTORED', entityType: 'Category', entityId: id, actorId, before: clean(category), after: clean(updated) })
         return clean(updated)
       })
     },

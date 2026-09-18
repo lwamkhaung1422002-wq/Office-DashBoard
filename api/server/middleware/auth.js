@@ -11,9 +11,9 @@ export function requireAuth(prisma) {
       const secret = process.env.JWT_SECRET
       if (!secret) throw new Error('JWT_SECRET is not configured')
       const payload = jwt.verify(token, secret, { algorithms: ['HS256'] })
-      const user = await prisma.user.findUnique({ where: { id: payload.sub }, select: { id: true, role: true, name: true, isActive: true } })
+      const user = await prisma.user.findUnique({ where: { id: payload.sub }, select: { id: true, email: true, role: true, name: true, isActive: true, mustChangePassword: true } })
       if (!user?.isActive) return next(new DomainError(401, 'ACCOUNT_INACTIVE', 'The account is unavailable'))
-      req.user = { id: user.id, role: user.role, name: user.name }
+      req.user = { id: user.id, email: user.email, role: user.role, name: user.name, mustChangePassword: user.mustChangePassword }
       next()
     } catch (error) {
       if (error instanceof DomainError) return next(error)
@@ -22,10 +22,17 @@ export function requireAuth(prisma) {
   }
 }
 
+export function requirePasswordChanged(req, _res, next) {
+  if (req.user?.mustChangePassword) {
+    return next(new DomainError(403, 'PASSWORD_CHANGE_REQUIRED', 'Change the temporary password before continuing'))
+  }
+  next()
+}
+
 export function requireRoles(...roles) {
   return (req, _res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
-      return next(new DomainError(403, 'FORBIDDEN', 'You do not have permission to manage categories'))
+      return next(new DomainError(403, 'FORBIDDEN', 'You do not have permission to perform this action'))
     }
     next()
   }

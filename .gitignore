@@ -6,6 +6,8 @@ node_modules/
 
 # Generated files
 api/generated/
+api/dist/
+api/storage/
 
 # IDE
 .agents/

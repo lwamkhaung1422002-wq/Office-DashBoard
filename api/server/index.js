@@ -1,12 +1,13 @@
-import 'dotenv/config'
 import { createApp } from './app.js'
+import { getEnv } from './config/env.js'
+import { logger } from './lib/logger.js'
 import { prisma } from './lib/prisma.js'
 
-const port = Number(process.env.API_PORT || 3001)
-const server = createApp().listen(port, () => console.log(`API listening on http://localhost:${port}`))
+const env = getEnv()
+const server = createApp().listen(env.API_PORT, () => logger.info({ port: env.API_PORT }, 'API listening'))
 
 async function shutdown(signal) {
-  console.log(`${signal} received; shutting down`)
+  logger.info({ signal }, 'Shutting down')
   server.close(async () => {
     await prisma.$disconnect()
     process.exit(0)
