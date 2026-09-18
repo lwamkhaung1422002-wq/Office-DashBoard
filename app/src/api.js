@@ -16,9 +16,10 @@ export async function api(path, options = {}) {
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
-    const error = new Error(payload.error?.message || 'တောင်းဆိုမှု မအောင်မြင်ပါ')
-    error.code = payload.error?.code
-    error.details = payload.error?.details
+    const error = Object.assign(new Error(payload.error?.message || 'တောင်းဆိုမှု မအောင်မြင်ပါ'), {
+      code: payload.error?.code,
+      details: payload.error?.details,
+    })
     throw error
   }
   return payload.data

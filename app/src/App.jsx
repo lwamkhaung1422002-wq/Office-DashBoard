@@ -48,7 +48,7 @@ function App(){
     </aside>
     <main className="main">
       <header className="workspace-header"><div className="header-page-title"><span>{nav.find(n=>n[0]===page)?.[1]}</span></div><div className="profile"><button className="notification-button" aria-label="အသိပေးချက် ၅ ခု"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span>5</span></button><span className="avatar">AK</span><div><b>Admin K.</b><small>Administrator</small></div></div></header>
-      {page!=='entry'&&<div className="page-context"><small>Workspace / {nav.find(n=>n[0]===page)?.[1]}</small><h2>{nav.find(n=>n[0]===page)?.[1]}</h2></div>}
+      {!['entry','categories'].includes(page)&&<div className="page-context"><small>Workspace / {nav.find(n=>n[0]===page)?.[1]}</small><h2>{nav.find(n=>n[0]===page)?.[1]}</h2></div>}
       {page==='overview'&&<Overview go={setPage}/>}
       {page==='categories'&&<Categories onViewData={id=>{setCategoryFilter(id);setPage('entry')}} onViewDocuments={id=>{setCategoryFilter(id);setPage('reports')}}/>}
       {page==='entry'&&<DataRecordsPage categoryId={categoryFilter}/>} {page==='reports'&&<DocumentsPage categoryId={categoryFilter}/>} {page==='activity'&&<Activity/>}
