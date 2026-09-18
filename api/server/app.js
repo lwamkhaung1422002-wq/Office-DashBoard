@@ -1,0 +1,52 @@
+import express from 'express'
+import compression from 'compression'
+import cors from 'cors'
+import rateLimit from 'express-rate-limit'
+import helmet from 'helmet'
+import pinoHttp from 'pino-http'
+import { prisma as defaultPrisma } from './lib/prisma.js'
+import { requireAuth } from './middleware/auth.js'
+import { errorHandler, notFoundHandler } from './middleware/error-handler.js'
+import { authRoutes } from './modules/auth/auth.routes.js'
+import { categoryRoutes } from './modules/categories/category.routes.js'
+import { dataRoutes, documentRoutes } from './modules/records/record.routes.js'
+
+export function createApp(prisma = defaultPrisma) {
+  const app = express()
+  app.disable('x-powered-by')
+  app.use(helmet())
+  app.use(cors({ origin: allowedOrigins(), credentials: false }))
+  app.use(compression())
+  app.use(pinoHttp({ level: process.env.LOG_LEVEL || 'info', enabled: process.env.NODE_ENV !== 'test' }))
+  app.use('/api', rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 500,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    skip: req => req.path === '/health' || req.path === '/ready',
+  }))
+  app.use(express.json({ limit: '1mb' }))
+  app.get('/api/health', (_req, res) => res.json({ status: 'ok' }))
+  app.get('/api/ready', async (_req, res) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`
+      res.json({ status: 'ready', database: 'connected' })
+    } catch {
+      res.status(503).json({ status: 'unavailable', database: 'disconnected' })
+    }
+  })
+  app.use('/api/auth', authRoutes(prisma))
+  app.use('/api', requireAuth(prisma))
+  app.use('/api/categories', categoryRoutes(prisma))
+  app.use('/api/data', dataRoutes(prisma))
+  app.use('/api/documents', documentRoutes(prisma))
+  app.use(notFoundHandler)
+  app.use(errorHandler)
+  return app
+}
+
+function allowedOrigins() {
+  const configured = process.env.CORS_ORIGINS
+  if (!configured) return ['http://localhost:5173']
+  return configured.split(',').map(origin => origin.trim()).filter(Boolean)
+}

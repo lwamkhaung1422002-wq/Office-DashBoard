@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Environment files
+.env
+
+# Generated files
+api/generated/
+
+# IDE
+.agents/
+.claude/
+.windsurf/
