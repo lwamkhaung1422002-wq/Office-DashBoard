@@ -57,6 +57,22 @@ export function isEditingTarget(target) {
   return typeof Element !== 'undefined' && target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"], form'))
 }
 
+export function createCutController() {
+  let current = []
+  return {
+    set(items) { current = [...items]; return current },
+    get() { return current },
+    clear() { current = [] },
+    async paste(destination, mover) {
+      const snapshot = [...current]
+      if (!snapshot.length) return []
+      await mover(snapshot, destination)
+      current = []
+      return snapshot
+    },
+  }
+}
+
 function formatBytes(bytes = 0) {
   if (!bytes) return '0 KB'
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`

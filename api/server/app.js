@@ -18,6 +18,7 @@ import { createStorage } from './lib/storage.js'
 import { adminDashboardRoutes, viewerDashboardRoutes } from './modules/dashboard/dashboard.routes.js'
 import { auditRoutes } from './modules/audit/audit.routes.js'
 import { reportRoutes } from './modules/reports/report.routes.js'
+import { trashRoutes } from './modules/trash/trash.routes.js'
 
 export function createApp(prisma = defaultPrisma, storage = createStorage()) {
   const app = express()
@@ -55,6 +56,7 @@ export function createApp(prisma = defaultPrisma, storage = createStorage()) {
   app.use('/api/admin/dashboard-widgets', adminDashboardRoutes(prisma))
   app.use('/api/admin/audit', auditRoutes(prisma))
   app.use('/api/admin/reports', reportRoutes(prisma))
+  app.use('/api/admin/trash', trashRoutes(prisma, storage))
   app.use('/api/categories', categoryRoutes(prisma))
   app.use('/api/data', dataRoutes(prisma))
   app.use('/api/documents', documentRoutes(prisma, storage))

@@ -67,3 +67,24 @@
 .fm-details-hero small,.fm-details-dialog dt{font-size:12px}
 .fm-details-dialog dd{font-size:13px;font-weight:600;line-height:1.5}
 .fm-toast{font-size:13px;font-weight:600;line-height:1.5}
+
+.fm-toolbar button.active{border-color:#8e68d8;background:#f2edff;color:#6941b8}
+.fm-context-menu hr{height:1px;margin:5px 4px;border:0;background:#e5ecf3}
+.fm-context-menu button.danger{color:#c83348}
+.fm-context-menu button.danger:hover{background:#fff0f2;color:#b31f36}
+.fm-dialog>footer button.danger{border-color:#d9364d;background:#d9364d;color:#fff}
+.fm-delete-message{margin:0;padding:14px;display:flex;gap:13px;border-radius:8px;background:#eef7ff;color:#1778cf}
+.fm-delete-message.danger{background:#fff0f2;color:#cf3048}
+.fm-delete-message>svg{width:30px;height:30px;flex:0 0 auto}
+.fm-delete-message>span{display:flex;flex-direction:column;gap:5px}.fm-delete-message b{color:#173e70;font-size:15px}.fm-delete-message small{color:#5f7897;font-size:13px;line-height:1.6}
+.fm-trash-heading{min-height:76px;padding:13px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dfe8f2;background:linear-gradient(110deg,#f8fbff,#f2f7fd)}
+.fm-trash-heading>div{display:flex;align-items:center;gap:12px}.fm-trash-heading svg{width:30px;height:30px;color:#7850c4}.fm-trash-heading span{display:flex;flex-direction:column}.fm-trash-heading b{color:#173d70;font-size:18px}.fm-trash-heading small{margin-top:3px;color:#6c84a2;font-size:12px}.fm-trash-heading button{height:38px;padding:0 14px;border:1px solid #c7d8e7;border-radius:7px;background:#fff;color:#31577f;font-size:13px;font-weight:600}
+.fm-trash-list .fm-list-head,.fm-trash-list .fm-row{grid-template-columns:minmax(240px,1.5fr) 120px minmax(230px,1.25fr) 180px 180px 150px}
+.fm-trash-list .fm-row>span:nth-child(3){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fm-trash-actions{display:flex;align-items:center;gap:5px}.fm-trash-actions button{width:36px;height:36px;padding:0;display:grid;place-items:center;border:0;border-radius:6px;background:#edf7ff;color:#0879df}.fm-trash-actions button.danger{background:#fff0f2;color:#d52d45}.fm-trash-actions svg{width:20px;height:20px}
+
+/* Final File Manager readability scale for Burmese desktop use. */
+.file-manager{font-size:15px;font-weight:450;line-height:1.65}
+.fm-tree-name span{font-size:15px;font-weight:600}.fm-toolbar button,.fm-sort{font-size:14px;font-weight:600}.fm-search input{font-size:14px}
+.fm-list-head{font-size:13px;font-weight:600}.fm-row{font-size:15px;font-weight:450;line-height:1.6}.fm-name-cell b{font-size:15px;font-weight:600}.fm-type{font-size:12px;font-weight:600}
+.fm-context-menu button{font-size:14px;font-weight:500}.fm-dialog-note b{font-size:15px}.fm-dialog-note small{font-size:13px}.fm-field{font-size:14px;font-weight:600}.fm-field input,.fm-field select{font-size:15px;font-weight:400}.fm-details-dialog dt{font-size:13px}.fm-details-dialog dd{font-size:14px;font-weight:500}

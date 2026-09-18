@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, resolve, sep } from 'node:path'
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 
 function safeLocalPath(root, key) {
   const target = resolve(root, key)
@@ -41,6 +41,9 @@ export function createStorage(customEnv) {
         const response = await client.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))
         return Buffer.from(await response.Body.transformToByteArray())
       },
+      async deleteObject(key) {
+        await client.send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))
+      },
     }
   }
   const root = resolve(process.cwd(), env.STORAGE_LOCAL_DIR)
@@ -53,6 +56,9 @@ export function createStorage(customEnv) {
     },
     getObject(key) {
       return readFile(safeLocalPath(root, key))
+    },
+    deleteObject(key) {
+      return rm(safeLocalPath(root, key), { force: true })
     },
   }
 }

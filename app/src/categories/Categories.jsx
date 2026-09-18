@@ -5,18 +5,21 @@ import CloseRounded from '@mui/icons-material/CloseRounded'
 import ContentCutRounded from '@mui/icons-material/ContentCutRounded'
 import CreateNewFolderOutlined from '@mui/icons-material/CreateNewFolderOutlined'
 import DriveFileMoveOutlined from '@mui/icons-material/DriveFileMoveOutlined'
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import EditOutlined from '@mui/icons-material/EditOutlined'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import FolderOpenRounded from '@mui/icons-material/FolderOpenRounded'
 import FolderRounded from '@mui/icons-material/FolderRounded'
 import GridViewRounded from '@mui/icons-material/GridViewRounded'
 import HomeRounded from '@mui/icons-material/HomeRounded'
+import HistoryRounded from '@mui/icons-material/HistoryRounded'
 import ImageRounded from '@mui/icons-material/ImageRounded'
 import InfoOutlined from '@mui/icons-material/InfoOutlined'
 import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded'
 import MoreVertRounded from '@mui/icons-material/MoreVertRounded'
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded'
 import PictureAsPdfRounded from '@mui/icons-material/PictureAsPdfRounded'
+import RestoreFromTrashRounded from '@mui/icons-material/RestoreFromTrashRounded'
 import SearchRounded from '@mui/icons-material/SearchRounded'
 import SortRounded from '@mui/icons-material/SortRounded'
 import TableChartRounded from '@mui/icons-material/TableChartRounded'
@@ -24,7 +27,7 @@ import UploadFileRounded from '@mui/icons-material/UploadFileRounded'
 import ViewListRounded from '@mui/icons-material/ViewListRounded'
 import { api, apiBlob } from '../api.js'
 import { categoryKeys, useCategoryMutation, useCategoryTree, useFolderContents } from './category-queries.js'
-import { categoryDescendantIds, filterAndSortItems, flattenCategories, isEditingTarget, normalizeFileManagerItems } from './category-utils.js'
+import { categoryDescendantIds, createCutController, filterAndSortItems, flattenCategories, isEditingTarget, normalizeFileManagerItems } from './category-utils.js'
 import './categories.css'
 
 const itemKey = item => `${item.itemType}:${item.id}`
@@ -37,12 +40,12 @@ function ItemIcon({ type }) {
   return <ImageRounded />
 }
 
-function FolderTree({ nodes, selectedId, expanded, onToggle, onSelect, depth = 0 }) {
+function FolderTree({ nodes, selectedId, expanded, onToggle, onSelect, onContext, depth = 0 }) {
   return nodes.map(node => {
     const opened = expanded.has(node.id)
     const hasChildren = Boolean(node.children?.length)
     return <div className="fm-tree-branch" key={node.id}>
-      <div className={`fm-tree-row ${selectedId === node.id ? 'selected' : ''}`} style={/** @type {import('react').CSSProperties} */ ({ '--tree-depth': depth })}>
+      <div className={`fm-tree-row ${selectedId === node.id ? 'selected' : ''}`} style={/** @type {import('react').CSSProperties} */ ({ '--tree-depth': depth })} onContextMenu={event => onContext(event, node)}>
         <button type="button" className="fm-tree-toggle" onClick={() => hasChildren && onToggle(node.id)} disabled={!hasChildren} aria-label={opened ? 'Folder ခေါက်ရန်' : 'Folder ဖြန့်ရန်'}>
           {hasChildren && (opened ? <ExpandMoreRounded /> : <ChevronRightRounded />)}
         </button>
@@ -50,7 +53,7 @@ function FolderTree({ nodes, selectedId, expanded, onToggle, onSelect, depth = 0
           {opened ? <FolderOpenRounded /> : <FolderRounded />}<span>{node.name}</span>
         </button>
       </div>
-      {opened && hasChildren && <FolderTree nodes={node.children} selectedId={selectedId} expanded={expanded} onToggle={onToggle} onSelect={onSelect} depth={depth + 1} />}
+      {opened && hasChildren && <FolderTree nodes={node.children} selectedId={selectedId} expanded={expanded} onToggle={onToggle} onSelect={onSelect} onContext={onContext} depth={depth + 1} />}
     </div>
   })
 }
@@ -166,7 +169,7 @@ function UploadDialog({ upload, setUpload, folderId, onDone }) {
   </div>
 }
 
-function ContextMenu({ menu, onClose, onOpen, onRename, onMove, onCut, onDetails }) {
+export function ContextMenu({ menu, onClose, onOpen, onNewFolder, onAddFile, onRename, onMove, onCut, onDetails, onDelete }) {
   useEffect(() => {
     const close = () => onClose()
     window.addEventListener('click', close)
@@ -175,10 +178,24 @@ function ContextMenu({ menu, onClose, onOpen, onRename, onMove, onCut, onDetails
   }, [onClose])
   return <div className="fm-context-menu" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()} role="menu">
     <button onClick={onOpen}><OpenInNewRounded />Open</button>
+    {menu.fromTree && <button onClick={onNewFolder}><CreateNewFolderOutlined />New Folder</button>}
+    {menu.fromTree && <button onClick={onAddFile}><UploadFileRounded />Add File</button>}
     <button onClick={onRename}><EditOutlined />Rename</button>
     <button onClick={onMove}><DriveFileMoveOutlined />Move to…</button>
     <button onClick={onCut}><ContentCutRounded />Cut <kbd>Ctrl + X</kbd></button>
     <button onClick={onDetails}><InfoOutlined />Details</button>
+    <hr />
+    <button className="danger" onClick={onDelete}><DeleteOutlineRounded />Delete</button>
+  </div>
+}
+
+function DeleteDialog({ item, permanent = false, busy, error, onClose, onConfirm }) {
+  return <div className="fm-dialog-backdrop" onMouseDown={event => event.target === event.currentTarget && !busy && onClose()}>
+    <section className="fm-dialog fm-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-dialog-title">
+      <header><div><small>{permanent ? 'Permanent deletion' : 'Recently Deleted'}</small><h2 id="delete-dialog-title">{permanent ? 'Delete permanently?' : 'Move to Recently Deleted?'}</h2></div><button onClick={onClose} disabled={busy}><CloseRounded /></button></header>
+      <div className="fm-dialog-body"><p className={`fm-delete-message ${permanent ? 'danger' : ''}`}><DeleteOutlineRounded /><span><b>{item.name}</b><small>{permanent ? 'This cannot be undone. The stored file and all related data will be permanently removed.' : 'This item will move to Recently Deleted and can be restored for 30 days.'}</small></span></p>{error && <p className="fm-error">{error}</p>}</div>
+      <footer><button onClick={onClose} disabled={busy}>Cancel</button><button className="danger" onClick={onConfirm} disabled={busy}>{busy ? 'Working…' : permanent ? 'Delete permanently' : 'Move to Recently Deleted'}</button></footer>
+    </section>
   </div>
 }
 
@@ -188,6 +205,8 @@ export default function Categories({ onViewData }) {
   const fileInput = useRef(null)
   const newFolderBlurAction = useRef('')
   const renameBlurAction = useRef('')
+  const cutController = useRef(createCutController())
+  const selectedFolderRef = useRef(null)
   const [selectedFolderId, setSelectedFolderId] = useState(null)
   const [expanded, setExpanded] = useState(new Set())
   const [selection, setSelection] = useState(new Set())
@@ -201,22 +220,39 @@ export default function Categories({ onViewData }) {
   const [menu, setMenu] = useState(null)
   const [moveItems, setMoveItems] = useState(null)
   const [detailsItem, setDetailsItem] = useState(null)
+  const [deleteItem, setDeleteItem] = useState(null)
   const [upload, setUpload] = useState(null)
   const [uploadFolderId, setUploadFolderId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [trashMode, setTrashMode] = useState(false)
+  const [trash, setTrash] = useState({ loading: false, items: [], error: '' })
+  const [trashRevision, setTrashRevision] = useState(0)
   const treeQuery = useCategoryTree()
   const contentsQuery = useFolderContents(selectedFolderId)
   const tree = useMemo(() => treeQuery.data || [], [treeQuery.data])
   const contents = useMemo(() => selectedFolderId ? contentsQuery.data : { folders: tree, dataItems: [], documents: [], breadcrumb: [] }, [contentsQuery.data, selectedFolderId, tree])
   const allItems = useMemo(() => normalizeFileManagerItems(contents || {}), [contents])
   const visibleItems = useMemo(() => filterAndSortItems(allItems, search, sortBy), [allItems, search, sortBy])
+  const visibleTrash = useMemo(() => filterAndSortItems(trash.items.map(item => ({ ...item, updatedAt: item.archivedAt })), search, sortBy), [trash.items, search, sortBy])
   const selectedItems = useMemo(() => allItems.filter(item => selection.has(itemKey(item))), [allItems, selection])
   const location = selectedFolderId ? `Home / ${(contents?.breadcrumb || []).map(item => item.name).join(' / ')}` : 'Home'
   const cutKeys = useMemo(() => new Set(cutItems.map(itemKey)), [cutItems])
   const displayedExpanded = useMemo(() => expanded.size ? expanded : new Set(tree.map(folder => folder.id)), [expanded, tree])
   const canManage = user().role === 'ADMIN'
+  useEffect(() => { selectedFolderRef.current = selectedFolderId }, [selectedFolderId])
+  useEffect(() => {
+    if (!trashMode) return undefined
+    let active = true
+    api('/admin/trash').then(items => active && setTrash({ loading: false, items, error: '' })).catch(requestError => active && setTrash({ loading: false, items: [], error: requestError.message }))
+    return () => { active = false }
+  }, [trashMode, trashRevision])
+
+  function toggleTrash() {
+    if (!trashMode) setTrash(current => ({ ...current, loading: true, error: '' }))
+    setTrashMode(value => !value); setSelection(new Set()); setSearch('')
+  }
   useEffect(() => {
     if (!notice) return undefined
     const timer = setTimeout(() => setNotice(''), 2800)
@@ -232,6 +268,7 @@ export default function Categories({ onViewData }) {
   }
 
   function navigateToFolder(id) {
+    setTrashMode(false)
     setSelectedFolderId(id)
     setSelection(new Set())
     setMenu(null)
@@ -269,6 +306,21 @@ export default function Categories({ onViewData }) {
     setMenu({ x, y, item })
   }
 
+  function openTreeMenu(event, node) {
+    event.preventDefault(); event.stopPropagation()
+    const x = Math.min(event.clientX, window.innerWidth - 230)
+    const y = Math.min(event.clientY, window.innerHeight - 350)
+    setMenu({ x, y, fromTree: true, item: { ...node, itemType: 'FOLDER', typeLabel: 'Folder', sizeLabel: `${(node.children?.length || 0) + (node.directDataCount || 0) + (node.directDocumentCount || 0)} items` } })
+  }
+
+  function beginNewFolder(parentId = selectedFolderId) {
+    if (parentId !== selectedFolderId) navigateToFolder(parentId)
+    newFolderBlurAction.current = ''
+    setNewFolderName('')
+    setNewFolder(true)
+    setMenu(null)
+  }
+
   async function createFolder() {
     const name = newFolderName.trim()
     setNewFolder(false); setNewFolderName('')
@@ -303,19 +355,31 @@ export default function Categories({ onViewData }) {
     setBusy(true); setError('')
     try {
       for (const item of items) await move(item, targetFolderId)
-      setMoveItems(null); setCutItems([]); setSelection(new Set()); await refresh(); setNotice('Items moved successfully')
+      setMoveItems(null); cutController.current.clear(); setCutItems([]); setSelection(new Set()); await refresh(); setNotice('Items moved successfully')
     } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
   }
 
-  function startRename(item = selectedItems[0]) {
-    if (!item || selectedItems.length > 1) return
+  async function pasteCut(targetFolderId) {
+    setBusy(true); setError('')
+    try {
+      const pasted = await cutController.current.paste(targetFolderId, async (items, destination) => {
+        for (const item of items) await move(item, destination)
+      })
+      if (!pasted.length) return
+      setCutItems([]); setSelection(new Set()); await refresh(); setNotice('Items moved successfully')
+    } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
+  }
+
+  function startRename(item) {
+    const target = item || selectedItems[0]
+    if (!target || (!item && selectedItems.length > 1)) return
     renameBlurAction.current = ''
-    setMenu(null); setRename({ key: itemKey(item), name: item.name, item })
+    setMenu(null); setRename({ key: itemKey(target), name: target.name, item: target })
   }
 
   function cut(items = selectedItems) {
     if (!items.length) return
-    setCutItems(items); setMenu(null); setNotice(`${items.length} item cut — destination Folder တွင် Ctrl + V နှိပ်ပါ`)
+    cutController.current.set(items); setCutItems(items); setMenu(null); setNotice(`${items.length} item cut — destination Folder တွင် Ctrl + V နှိပ်ပါ`)
   }
 
   async function chooseFile(event) {
@@ -348,6 +412,31 @@ export default function Categories({ onViewData }) {
     setMoveItems(selectedItems)
   }
 
+  async function moveToTrash(item) {
+    setBusy(true); setError('')
+    try {
+      const path = item.itemType === 'FOLDER' ? `/admin/categories/${item.id}/archive` : item.itemType === 'DATA' ? `/admin/data/collections/${item.id}/archive` : `/admin/documents/${item.id}/archive`
+      await api(path, { method: 'POST' })
+      setDeleteItem(null); setSelection(new Set()); await refresh(); setNotice('Moved to Recently Deleted')
+    } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
+  }
+
+  async function restoreTrashItem(item) {
+    setBusy(true); setError('')
+    try {
+      await api(`/admin/trash/${item.itemType.toLowerCase()}/${item.id}/restore`, { method: 'POST' })
+      setTrashRevision(value => value + 1); await refresh(); setNotice('Item restored')
+    } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
+  }
+
+  async function purgeTrashItem(item) {
+    setBusy(true); setError('')
+    try {
+      await api(`/admin/trash/${item.itemType.toLowerCase()}/${item.id}`, { method: 'DELETE' })
+      setDeleteItem(null); setTrashRevision(value => value + 1); await refresh(); setNotice('Item permanently deleted')
+    } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
+  }
+
   useEffect(() => {
     const keydown = event => {
       if (isEditingTarget(event.target)) return
@@ -355,10 +444,10 @@ export default function Categories({ onViewData }) {
       if (command && event.shiftKey && event.key.toLocaleLowerCase() === 'n') { event.preventDefault(); if (canManage) { newFolderBlurAction.current = ''; setNewFolder(true); setNewFolderName('') } }
       else if (command && event.key.toLocaleLowerCase() === 'a') { event.preventDefault(); setSelection(new Set(visibleItems.map(itemKey))) }
       else if (command && event.key.toLocaleLowerCase() === 'x') { event.preventDefault(); cut() }
-      else if (command && event.key.toLocaleLowerCase() === 'v') { event.preventDefault(); if (cutItems.length) confirmMove(selectedFolderId, cutItems) }
+      else if (command && event.key.toLocaleLowerCase() === 'v') { event.preventDefault(); pasteCut(selectedFolderRef.current) }
       else if (event.key === 'F2') { event.preventDefault(); startRename() }
       else if (event.key === 'Enter' && selectedItems.length === 1) { event.preventDefault(); openItem(selectedItems[0]) }
-      else if (event.key === 'Escape') { newFolderBlurAction.current = 'cancel'; renameBlurAction.current = 'cancel'; setSelection(new Set()); setCutItems([]); setMenu(null); setNewFolder(false); setRename(null) }
+      else if (event.key === 'Escape') { newFolderBlurAction.current = 'cancel'; renameBlurAction.current = 'cancel'; setSelection(new Set()); cutController.current.clear(); setCutItems([]); setMenu(null); setNewFolder(false); setRename(null) }
     }
     window.addEventListener('keydown', keydown)
     return () => window.removeEventListener('keydown', keydown)
@@ -371,17 +460,18 @@ export default function Categories({ onViewData }) {
       <h2>Folders</h2>
       <div className={`fm-tree-row home ${selectedFolderId === null ? 'selected' : ''}`}><span className="fm-tree-spacer" /><button className="fm-tree-name" onClick={() => navigateToFolder(null)}><HomeRounded /><span>Home</span></button></div>
       <div className="fm-tree-scroll">
-        {treeQuery.isLoading ? <div className="fm-tree-loading"><i /><i /><i /><i /></div> : tree.length ? <FolderTree nodes={tree} selectedId={selectedFolderId} expanded={displayedExpanded} onToggle={toggleTree} onSelect={navigateToFolder} /> : <p className="fm-empty-tree">Folder မရှိသေးပါ</p>}
+        {treeQuery.isLoading ? <div className="fm-tree-loading"><i /><i /><i /><i /></div> : tree.length ? <FolderTree nodes={tree} selectedId={selectedFolderId} expanded={displayedExpanded} onToggle={toggleTree} onSelect={navigateToFolder} onContext={openTreeMenu} /> : <p className="fm-empty-tree">Folder မရှိသေးပါ</p>}
       </div>
     </aside>
 
     <main className="fm-main">
       <div className="fm-toolbar">
         <div className="fm-toolbar-primary">
-          <button className="primary" onClick={() => { newFolderBlurAction.current = ''; setNewFolder(true); setNewFolderName('') }} disabled={!canManage}><CreateNewFolderOutlined />New Folder<KeyboardArrowDownRounded /></button>
-          <button onClick={requestAddFile} disabled={!canManage || busy}><UploadFileRounded />Add File<KeyboardArrowDownRounded /></button>
+          <button className="primary" onClick={() => beginNewFolder()} disabled={!canManage || trashMode}><CreateNewFolderOutlined />New Folder<KeyboardArrowDownRounded /></button>
+          <button onClick={requestAddFile} disabled={!canManage || busy || trashMode}><UploadFileRounded />Add File<KeyboardArrowDownRounded /></button>
           <input ref={fileInput} type="file" accept=".xlsx,.pdf,.jpg,.jpeg" onChange={chooseFile} hidden />
-          <button onClick={requestMove} disabled={!canManage}><DriveFileMoveOutlined />Move to</button>
+          <button onClick={requestMove} disabled={!canManage || trashMode}><DriveFileMoveOutlined />Move to</button>
+          <button className={trashMode ? 'active' : ''} onClick={toggleTrash} disabled={!canManage}><HistoryRounded />Recently Deleted</button>
         </div>
         <div className="fm-toolbar-tools">
           <label className="fm-search"><SearchRounded /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search in this folder…" /></label>
@@ -392,7 +482,19 @@ export default function Categories({ onViewData }) {
 
       <div className="fm-content" onClick={event => event.target === event.currentTarget && setSelection(new Set())}>
         {error && <div className="fm-inline-error" role="alert"><span>{error}</span><button onClick={() => setError('')}><CloseRounded /></button></div>}
-        {pageError ? <div className="fm-state error"><InfoOutlined /><b>Folder contents မဖွင့်နိုင်ပါ</b><span>{pageError.message}</span><button onClick={() => { treeQuery.refetch(); contentsQuery.refetch() }}>Try again</button></div>
+        {trashMode ? <div className="fm-list fm-trash-list" role="grid" aria-label="Recently Deleted">
+          <div className="fm-trash-heading"><div><HistoryRounded /><span><b>Recently Deleted</b><small>Items are permanently removed 30 days after deletion.</small></span></div><button onClick={() => setTrashMode(false)}>Back to files</button></div>
+          <div className="fm-list-head" role="row"><span>Name</span><span>Type</span><span>Original Location</span><span>Deleted</span><span>Auto Delete</span><span>Actions</span></div>
+          {trash.loading ? <div className="fm-list-loading"><i /><i /><i /></div> : trash.error ? <div className="fm-state error"><InfoOutlined /><b>Recently Deleted မဖွင့်နိုင်ပါ</b><span>{trash.error}</span><button onClick={() => setTrashRevision(value => value + 1)}>Try again</button></div> : visibleTrash.map(item => {
+            const iconType = item.itemType === 'DOCUMENT' ? (item.typeLabel === 'PDF' ? 'PDF' : 'IMAGE') : item.itemType
+            return <div className="fm-row" role="row" key={`${item.itemType}:${item.id}`}>
+              <span className="fm-name-cell"><span className={`fm-item-icon ${iconType.toLowerCase()}`}><ItemIcon type={iconType} /></span><b>{item.name}</b></span>
+              <span><em className={`fm-type ${iconType.toLowerCase()}`}>{item.typeLabel}</em></span><span title={item.originalLocation}>{item.originalLocation}</span><span>{formatDate(item.archivedAt)}</span><span>{formatDate(item.autoDeleteAt)}</span>
+              <span className="fm-trash-actions"><button onClick={() => restoreTrashItem(item)} disabled={busy} title="Restore"><RestoreFromTrashRounded /></button><button onClick={() => setDetailsItem(item)} disabled={busy} title="Details"><InfoOutlined /></button><button className="danger" onClick={() => setDeleteItem({ ...item, permanent: true })} disabled={busy} title="Delete permanently"><DeleteOutlineRounded /></button></span>
+            </div>
+          })}
+          {!trash.loading && !trash.error && !visibleTrash.length && <div className="fm-state"><RestoreFromTrashRounded /><b>Recently Deleted is empty</b><span>Deleted items will appear here for 30 days.</span></div>}
+        </div> : pageError ? <div className="fm-state error"><InfoOutlined /><b>Folder contents မဖွင့်နိုင်ပါ</b><span>{pageError.message}</span><button onClick={() => { treeQuery.refetch(); contentsQuery.refetch() }}>Try again</button></div>
           : loading ? <div className="fm-list-loading"><i /><i /><i /><i /><i /></div>
             : view === 'list' ? <div className="fm-list" role="grid" aria-label="Current folder contents">
               <div className="fm-list-head" role="row"><span>Name</span><span>Type</span><span>Size / Records</span><span>Last Modified</span><span>Modified By</span><span /></div>
@@ -411,12 +513,13 @@ export default function Categories({ onViewData }) {
               {visibleItems.map(item => { const key = itemKey(item); return <article key={key} className={`fm-grid-card ${selection.has(key) ? 'selected' : ''} ${cutKeys.has(key) ? 'cut' : ''}`} onClick={event => selectItem(event, item)} onDoubleClick={() => openItem(item)} onContextMenu={event => openMenu(event, item)}><span className={`fm-item-icon ${item.itemType.toLowerCase()}`}><ItemIcon type={item.itemType} /></span><div>{rename?.key === key ? <input value={rename.name} onChange={event => setRename(current => ({ ...current, name: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') { renameBlurAction.current = 'save'; renameItem(item, rename.name) } if (event.key === 'Escape') { renameBlurAction.current = 'cancel'; setRename(null) } }} onBlur={() => { if (renameBlurAction.current) { renameBlurAction.current = ''; return } renameItem(item, rename.name) }} autoFocus /> : <b>{item.name}</b>}<small>{item.typeLabel} · {item.sizeLabel}</small></div><button className="fm-kebab" onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); openMenu({ ...event, clientX: rect.right - 8, clientY: rect.bottom + 4, preventDefault: () => event.preventDefault(), stopPropagation: () => event.stopPropagation() }, item) }}><MoreVertRounded /></button></article>})}
             </div>}
       </div>
-      <footer className="fm-status"><span>{visibleItems.length} item{visibleItems.length === 1 ? '' : 's'}{selection.size ? ` · ${selection.size} selected` : ''}</span><div><span><kbd>Ctrl + A</kbd> Select all</span><span><kbd>Ctrl + X</kbd> Cut</span><span><kbd>Ctrl + V</kbd> Paste (Move)</span><span><kbd>Ctrl + Shift + N</kbd> New Folder</span><span><kbd>F2</kbd> Rename</span><span><kbd>Enter</kbd> Open</span></div></footer>
+      <footer className="fm-status"><span>{trashMode ? visibleTrash.length : visibleItems.length} item{(trashMode ? visibleTrash.length : visibleItems.length) === 1 ? '' : 's'}{!trashMode && selection.size ? ` · ${selection.size} selected` : ''}</span>{!trashMode && <div><span><kbd>Ctrl + A</kbd> Select all</span><span><kbd>Ctrl + X</kbd> Cut</span><span><kbd>Ctrl + V</kbd> Paste (Move)</span><span><kbd>Ctrl + Shift + N</kbd> New Folder</span><span><kbd>F2</kbd> Rename</span><span><kbd>Enter</kbd> Open</span></div>}</footer>
     </main>
 
-    {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} onOpen={() => openItem(menu.item)} onRename={() => startRename(menu.item)} onMove={() => { setMoveItems(selection.has(itemKey(menu.item)) ? selectedItems : [menu.item]); setMenu(null) }} onCut={() => cut(selection.has(itemKey(menu.item)) ? selectedItems : [menu.item])} onDetails={() => { setDetailsItem(menu.item); setMenu(null) }} />}
+    {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} onOpen={() => openItem(menu.item)} onNewFolder={() => beginNewFolder(menu.item.id)} onAddFile={() => { setUploadFolderId(menu.item.id); setMenu(null); fileInput.current?.click() }} onRename={() => { if (menu.fromTree) navigateToFolder(menu.item.parentId || null); startRename(menu.item) }} onMove={() => { setMoveItems(menu.fromTree || !selection.has(itemKey(menu.item)) ? [menu.item] : selectedItems); setMenu(null) }} onCut={() => cut(menu.fromTree || !selection.has(itemKey(menu.item)) ? [menu.item] : selectedItems)} onDetails={() => { setDetailsItem(menu.item); setMenu(null) }} onDelete={() => { setDeleteItem(menu.item); setMenu(null) }} />}
     {moveItems && <MoveDialog items={moveItems} tree={tree} onClose={() => { setMoveItems(null); setError('') }} onConfirm={confirmMove} busy={busy} error={error} />}
-    {detailsItem && <DetailsDialog item={detailsItem} location={location} onClose={() => setDetailsItem(null)} />}
+    {detailsItem && <DetailsDialog item={detailsItem} location={detailsItem.originalLocation || location} onClose={() => setDetailsItem(null)} />}
+    {deleteItem && <DeleteDialog item={deleteItem} permanent={deleteItem.permanent} busy={busy} error={error} onClose={() => { setDeleteItem(null); setError('') }} onConfirm={() => deleteItem.permanent ? purgeTrashItem(deleteItem) : moveToTrash(deleteItem)} />}
     {upload && <UploadDialog upload={upload} setUpload={setUpload} folderId={uploadFolderId} onDone={async () => { await refresh(); setNotice('File added successfully') }} />}
     {notice && <div className="fm-toast">{notice}</div>}
   </section>

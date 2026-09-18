@@ -1,9 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
-import Categories from '../src/categories/Categories.jsx'
+import Categories, { ContextMenu } from '../src/categories/Categories.jsx'
 import { categoryMutationRequest, folderContentsRequest } from '../src/categories/category-queries.js'
-import { filterAndSortItems, flattenCategories, normalizeFileManagerItems } from '../src/categories/category-utils.js'
+import { createCutController, filterAndSortItems, flattenCategories, normalizeFileManagerItems } from '../src/categories/category-utils.js'
 
 function renderFileManager() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -34,10 +34,35 @@ describe('File Manager frontend', () => {
     expect(html).toContain('New Folder')
     expect(html).toContain('Add File')
     expect(html).toContain('Move to')
+    expect(html).toContain('Recently Deleted')
     expect(html).not.toContain('type="checkbox"')
     expect(html).not.toContain('>Archive<')
-    expect(html).not.toContain('>Delete<')
     expect(html).not.toContain('>Copy<')
+  })
+
+  it('shows the required center and folder context actions with Delete below Details', () => {
+    const callbacks = { onClose: () => {}, onOpen: () => {}, onNewFolder: () => {}, onAddFile: () => {}, onRename: () => {}, onMove: () => {}, onCut: () => {}, onDetails: () => {}, onDelete: () => {} }
+    const html = renderToStaticMarkup(<ContextMenu menu={{ x: 0, y: 0, fromTree: true, item: { id: 'folder-1' } }} {...callbacks} />)
+    expect(html).toContain('New Folder')
+    expect(html).toContain('Add File')
+    expect(html).toContain('Move to…')
+    expect(html.indexOf('Delete')).toBeGreaterThan(html.indexOf('Details'))
+    expect(html).not.toContain('Copy')
+  })
+
+  it('keeps cut state through navigation and clears it only after a successful paste', async () => {
+    const clipboard = createCutController()
+    const item = { id: 'source-1', itemType: 'FOLDER' }
+    clipboard.set([item])
+    const destination = 'destination-folder'
+    const move = vi.fn(async () => {})
+    await clipboard.paste(destination, async (items, folderId) => move(items, folderId))
+    expect(move).toHaveBeenCalledWith([item], 'destination-folder')
+    expect(clipboard.get()).toEqual([])
+
+    clipboard.set([item])
+    await expect(clipboard.paste('broken-folder', async () => { throw new Error('move failed') })).rejects.toThrow('move failed')
+    expect(clipboard.get()).toEqual([item])
   })
 
   it('composes direct current-folder contents from existing real APIs', async () => {

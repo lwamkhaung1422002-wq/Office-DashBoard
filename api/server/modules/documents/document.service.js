@@ -86,6 +86,8 @@ export function createDocumentService(prisma, storage) {
     async restore(id, actorId) {
       const before = await internal(id, 'ADMIN', true)
       if (!before.archivedAt) return before
+      const category = await prisma.category.findFirst({ where: { id: before.categoryId, archivedAt: null }, select: { id: true } })
+      if (!category) throw new DomainError(409, 'ARCHIVED_CATEGORY', 'Restore the containing folder before restoring this document')
       return prisma.$transaction(async tx => {
         const after = await tx.document.update({ where: { id }, data: { archivedAt: null }, select: metadataSelect })
         await createAuditService(tx).record({ actorId, action: 'DOCUMENT_RESTORED', entityType: 'Document', entityId: id, before, after })

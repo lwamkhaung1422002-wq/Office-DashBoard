@@ -84,6 +84,31 @@ export function createDataService(prisma) {
       if (role && !allowedAccessLevels(role).includes(value.defaultAccessLevel)) throw notFound('Data collection')
       return value
     },
+    async archiveCollection(id, actorId) {
+      const before = await prisma.dataCollection.findUnique({ where: { id }, include: collectionInclude })
+      if (!before) throw notFound('Data collection')
+      if (before.archivedAt) return before
+      const archivedAt = new Date()
+      return prisma.$transaction(async tx => {
+        const after = await tx.dataCollection.update({ where: { id }, data: { archivedAt }, include: collectionInclude })
+        await tx.dataRecord.updateMany({ where: { dataCollectionId: id, archivedAt: null }, data: { archivedAt } })
+        await createAuditService(tx).record({ actorId, action: 'DATA_COLLECTION_ARCHIVED', entityType: 'DataCollection', entityId: id, before, after })
+        return after
+      })
+    },
+    async restoreCollection(id, actorId) {
+      const before = await prisma.dataCollection.findUnique({ where: { id }, include: { ...collectionInclude, category: { select: { archivedAt: true } } } })
+      if (!before) throw notFound('Data collection')
+      if (!before.archivedAt) return before
+      if (before.category.archivedAt) throw new DomainError(409, 'ARCHIVED_CATEGORY', 'Restore the containing folder before restoring this structured data')
+      const deletedAt = before.archivedAt
+      return prisma.$transaction(async tx => {
+        const after = await tx.dataCollection.update({ where: { id }, data: { archivedAt: null }, include: collectionInclude })
+        await tx.dataRecord.updateMany({ where: { dataCollectionId: id, archivedAt: deletedAt }, data: { archivedAt: null } })
+        await createAuditService(tx).record({ actorId, action: 'DATA_COLLECTION_RESTORED', entityType: 'DataCollection', entityId: id, before, after })
+        return after
+      })
+    },
     async list(query, role) {
       const take = Math.min(100, Math.max(1, query.limit || 50))
       /** @type {any} */

@@ -4,7 +4,7 @@ export function getToken() {
   return sessionStorage.getItem('office_access_token')
 }
 
-export async function api(path, options = {}) {
+async function request(path, options = {}) {
   const token = getToken()
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
   const response = await fetch(`${API_BASE}${path}`, {
@@ -23,7 +23,15 @@ export async function api(path, options = {}) {
     })
     throw error
   }
-  return payload.data
+  return payload
+}
+
+export async function api(path, options = {}) {
+  return (await request(path, options)).data
+}
+
+export function apiEnvelope(path, options = {}) {
+  return request(path, options)
 }
 
 export async function apiBlob(path) {

@@ -12,7 +12,7 @@ function memoryDatabase() {
     dataCollection: {
       findFirst: async ({ where }) => where.id === collection.id ? collection : null,
       findMany: async () => [collection],
-      findUnique: async () => collection,
+      findUnique: async ({ include } = {}) => include?.category ? { ...collection, category: { archivedAt: null } } : collection,
       update: async ({ data }) => Object.assign(collection, data, { updatedAt: new Date() }),
     },
     dataRecord: {
@@ -25,8 +25,9 @@ function memoryDatabase() {
         .slice(cursor ? state.records.findIndex(record => record.id === cursor.id) + skip : 0, take),
       create: async ({ data }) => { const row = { id: `record-${++sequence}`, archivedAt: null, createdAt: new Date(), updatedAt: new Date(), ...data }; state.records.push(row); return row },
       update: async ({ where, data }) => Object.assign(state.records.find(record => record.id === where.id), data, { updatedAt: new Date() }),
-      updateMany: async ({ where, data }) => { state.records.filter(record => record.dataCollectionId === where.dataCollectionId).forEach(record => Object.assign(record, data)); return { count: state.records.length } },
+      updateMany: async ({ where, data }) => { const rows = state.records.filter(record => record.dataCollectionId === where.dataCollectionId && (!Object.hasOwn(where, 'archivedAt') || record.archivedAt?.getTime?.() === where.archivedAt?.getTime?.() || record.archivedAt === where.archivedAt)); rows.forEach(record => Object.assign(record, data)); return { count: rows.length } },
     },
+    dashboardWidget: { updateMany: async () => ({ count: 0 }) },
     importJob: { updateMany: async ({ where, data }) => { state.imports.filter(job => job.dataCollectionId === where.dataCollectionId).forEach(job => Object.assign(job, data)); return { count: state.imports.length } } },
     auditLog: { create: async ({ data }) => { state.audits.push(data); return data } },
     $transaction: callback => callback(db),
@@ -75,5 +76,16 @@ describe('unified data service', () => {
     await service.updateCollection('collection-1', { categoryId: 'category-2', name: 'Budget 2026' }, 'admin-1')
     expect(db.state.records[0].categoryId).toBe('category-2')
     expect(db.state.imports[0].categoryId).toBe('category-2')
+  })
+
+  it('soft-deletes and restores a structured data collection with its records', async () => {
+    db.state.records.push({ id: 'row-1', categoryId: 'category-1', dataCollectionId: 'collection-1', archivedAt: null })
+    const archived = await service.archiveCollection('collection-1', 'admin-1')
+    expect(archived.archivedAt).toBeInstanceOf(Date)
+    expect(db.state.records[0].archivedAt).toEqual(archived.archivedAt)
+    const restored = await service.restoreCollection('collection-1', 'admin-1')
+    expect(restored.archivedAt).toBeNull()
+    expect(db.state.records[0].archivedAt).toBeNull()
+    expect(db.state.audits.slice(-2).map(item => item.action)).toEqual(['DATA_COLLECTION_ARCHIVED', 'DATA_COLLECTION_RESTORED'])
   })
 })

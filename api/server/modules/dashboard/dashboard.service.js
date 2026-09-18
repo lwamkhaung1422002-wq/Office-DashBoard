@@ -70,13 +70,13 @@ export function createDashboardService(prisma) {
     return collection.fields
   }
   async function widget(id, includeArchived = false) {
-    const value = await prisma.dashboardWidget.findFirst({ where: { id, ...(includeArchived ? {} : { archivedAt: null }) }, include: includeDefinition })
+    const value = await prisma.dashboardWidget.findFirst({ where: { id, ...(includeArchived ? {} : { archivedAt: null, dataCollection: { archivedAt: null } }) }, include: includeDefinition })
     if (!value) throw notFound('Dashboard widget')
     return value
   }
   return {
     listAdmin() {
-      return prisma.dashboardWidget.findMany({ where: { archivedAt: null }, include: includeDefinition, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] })
+      return prisma.dashboardWidget.findMany({ where: { archivedAt: null, dataCollection: { archivedAt: null } }, include: includeDefinition, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] })
     },
     get: widget,
     async create(input, actorId) {
@@ -111,7 +111,7 @@ export function createDashboardService(prisma) {
       return { widget: selected, data: await aggregateWidget(prisma, selected, role) }
     },
     async viewerDashboard(role) {
-      const widgets = await prisma.dashboardWidget.findMany({ where: { archivedAt: null, isActive: true, accessLevel: { in: allowedAccessLevels(role) } }, include: includeDefinition, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] })
+      const widgets = await prisma.dashboardWidget.findMany({ where: { archivedAt: null, isActive: true, dataCollection: { archivedAt: null }, accessLevel: { in: allowedAccessLevels(role) } }, include: includeDefinition, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] })
       return Promise.all(widgets.map(async item => ({ widget: item, data: await aggregateWidget(prisma, item, role) })))
     },
   }

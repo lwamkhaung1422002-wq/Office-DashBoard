@@ -23,6 +23,8 @@ export function dataRoutes(prisma) {
   router.get('/:id', async (req, res) => res.json({ data: await service.get(id.parse(req.params.id), req.user.role) }))
   router.post('/collections', requireRoles('ADMIN'), async (req, res) => res.status(201).json({ data: await service.createCollection(collectionSchema.parse(req.body), req.user.id) }))
   router.patch('/collections/:id', requireRoles('ADMIN'), async (req, res) => res.json({ data: await service.updateCollection(id.parse(req.params.id), collectionUpdateSchema.parse(req.body), req.user.id) }))
+  router.post('/collections/:id/archive', requireRoles('ADMIN'), async (req, res) => res.json({ data: await service.archiveCollection(id.parse(req.params.id), req.user.id) }))
+  router.post('/collections/:id/restore', requireRoles('ADMIN'), async (req, res) => res.json({ data: await service.restoreCollection(id.parse(req.params.id), req.user.id) }))
   router.post('/', requireRoles('ADMIN'), async (req, res) => res.status(201).json({ data: await service.create(recordSchema.parse(req.body), req.user.id) }))
   router.patch('/:id', requireRoles('ADMIN'), async (req, res) => res.json({ data: await service.update(id.parse(req.params.id), updateSchema.parse(req.body), req.user.id) }))
   router.post('/:id/archive', requireRoles('ADMIN'), async (req, res) => res.json({ data: await service.archive(id.parse(req.params.id), req.user.id) }))

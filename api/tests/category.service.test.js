@@ -3,12 +3,12 @@ import { createCategoryService } from '../server/modules/categories/category.ser
 
 function memoryDatabase() {
   let sequence = 0
-  const state = { categories: [], data: [], documents: [], audits: [] }
+  const state = { categories: [], collections: [], data: [], documents: [], widgets: [], audits: [] }
   const matchArchive = (row, where = {}) => !Object.hasOwn(where, 'archivedAt') || row.archivedAt === where.archivedAt
   const db = {
     state,
     category: {
-      findMany: async ({ where = {} } = {}) => state.categories.filter(row => matchArchive(row, where)),
+      findMany: async ({ where = {} } = {}) => state.categories.filter(row => matchArchive(row, where) && (!where.parentId?.in || where.parentId.in.includes(row.parentId))),
       findUnique: async ({ where, select }) => {
         const row = state.categories.find(item => item.id === where.id) || null
         if (!row || !select) return row
@@ -30,16 +30,24 @@ function memoryDatabase() {
         state.categories[index] = { ...state.categories[index], ...data, updatedAt: new Date() }
         return state.categories[index]
       },
+      updateMany: async ({ where, data }) => { const rows = state.categories.filter(row => (!where.id?.in || where.id.in.includes(row.id)) && matchArchive(row, where)); rows.forEach(row => Object.assign(row, data)); return { count: rows.length } },
       count: async ({ where }) => state.categories.filter(row => row.parentId === where.parentId && matchArchive(row, where)).length,
     },
     dataRecord: {
       groupBy: async ({ where }) => groups(state.data.filter(row => matchArchive(row, where))),
       count: async ({ where }) => state.data.filter(row => row.categoryId === where.categoryId && matchArchive(row, where)).length,
+      updateMany: async ({ where, data }) => { const rows = state.data.filter(row => (!where.categoryId?.in || where.categoryId.in.includes(row.categoryId)) && matchArchive(row, where)); rows.forEach(row => Object.assign(row, data)); return { count: rows.length } },
     },
     document: {
       groupBy: async ({ where }) => groups(state.documents.filter(row => matchArchive(row, where))),
       count: async ({ where }) => state.documents.filter(row => row.categoryId === where.categoryId && matchArchive(row, where)).length,
+      updateMany: async ({ where, data }) => { const rows = state.documents.filter(row => (!where.categoryId?.in || where.categoryId.in.includes(row.categoryId)) && matchArchive(row, where)); rows.forEach(row => Object.assign(row, data)); return { count: rows.length } },
     },
+    dataCollection: {
+      findMany: async ({ where }) => state.collections.filter(row => where.categoryId.in.includes(row.categoryId) && matchArchive(row, where)).map(row => ({ id: row.id })),
+      updateMany: async ({ where, data }) => { const rows = state.collections.filter(row => where.id.in.includes(row.id) && matchArchive(row, where)); rows.forEach(row => Object.assign(row, data)); return { count: rows.length } },
+    },
+    dashboardWidget: { updateMany: async ({ where, data }) => { const rows = state.widgets.filter(row => where.dataCollectionId.in.includes(row.dataCollectionId) && matchArchive(row, where)); rows.forEach(row => Object.assign(row, data)); return { count: rows.length } } },
     auditLog: { create: async ({ data }) => { state.audits.push(data); return data } },
     $transaction: callback => callback(db),
   }
@@ -103,23 +111,28 @@ describe('category service', () => {
     await expect(service.create({ name: 'Orphan', parentId: 'missing' }, 'admin-1')).rejects.toMatchObject({ code: 'INVALID_PARENT' })
   })
 
-  it('rejects unsafe archive and restores only into an active parent', async () => {
+  it('trashes and restores a complete folder subtree while preserving parent safety', async () => {
     const root = await service.create({ name: 'Root' }, 'admin-1')
     const child = await service.create({ name: 'Child', parentId: root.id }, 'admin-1')
-    await expect(service.archive(root.id, 'admin-1')).rejects.toMatchObject({ code: 'CATEGORY_NOT_EMPTY' })
-    await service.archive(child.id, 'admin-1')
+    db.state.collections.push({ id: 'collection-1', categoryId: child.id, archivedAt: null })
+    db.state.data.push({ categoryId: child.id, archivedAt: null })
+    db.state.documents.push({ categoryId: child.id, archivedAt: null })
     await service.archive(root.id, 'admin-1')
+    expect(db.state.categories.every(item => item.archivedAt instanceof Date)).toBe(true)
+    expect(db.state.collections[0].archivedAt).toEqual(root.archivedAt || db.state.categories[0].archivedAt)
     await expect(service.restore(child.id, 'admin-1')).rejects.toMatchObject({ code: 'ARCHIVED_PARENT' })
     await service.restore(root.id, 'admin-1')
-    const restored = await service.restore(child.id, 'admin-1')
-    expect(restored.archivedAt).toBeNull()
+    expect(db.state.categories.every(item => item.archivedAt === null)).toBe(true)
+    expect(db.state.collections[0].archivedAt).toBeNull()
     expect(db.state.audits.at(-1).action).toBe('CATEGORY_RESTORED')
   })
 
-  it('rejects archive when active data or documents remain', async () => {
+  it('allows non-empty folders to move to trash and hides their active content', async () => {
     const category = await service.create({ name: 'Records' }, 'admin-1')
     db.state.data.push({ categoryId: category.id, archivedAt: null })
     db.state.documents.push({ categoryId: category.id, archivedAt: null })
-    await expect(service.archive(category.id, 'admin-1')).rejects.toMatchObject({ code: 'CATEGORY_NOT_EMPTY', details: { dataRecords: 1, documents: 1 } })
+    await service.archive(category.id, 'admin-1')
+    expect(db.state.data[0].archivedAt).toBeInstanceOf(Date)
+    expect(db.state.documents[0].archivedAt).toBeInstanceOf(Date)
   })
 })

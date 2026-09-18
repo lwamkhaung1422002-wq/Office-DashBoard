@@ -78,6 +78,21 @@ async function loadHierarchy(db, includeArchived = false, role) {
   )
 }
 
+async function categorySubtree(db, rootId) {
+  const root = await db.category.findUnique({ where: { id: rootId } })
+  if (!root) throw notFound('Category')
+  const rows = [root]
+  const seen = new Set([root.id])
+  let frontier = [root.id]
+  while (frontier.length) {
+    const children = (await db.category.findMany({ where: { parentId: { in: frontier } } })).filter(item => !seen.has(item.id))
+    children.forEach(item => seen.add(item.id))
+    rows.push(...children)
+    frontier = children.map(item => item.id)
+  }
+  return rows
+}
+
 export function createCategoryService(prisma) {
   return {
     async tree({ search = '', includeArchived = false } = {}, role) {
@@ -158,27 +173,29 @@ export function createCategoryService(prisma) {
 
     async archive(id, actorId) {
       return prisma.$transaction(async tx => {
-        const category = await tx.category.findUnique({ where: { id } })
-        if (!category) throw notFound('Category')
+        const subtree = await categorySubtree(tx, id)
+        const category = subtree[0]
         if (category.archivedAt) return clean(category)
-        const [children, dataRecords, documents] = await Promise.all([
-          tx.category.count({ where: { parentId: id, archivedAt: null } }),
-          tx.dataRecord.count({ where: { categoryId: id, archivedAt: null } }),
-          tx.document.count({ where: { categoryId: id, archivedAt: null } }),
+        const archivedAt = new Date()
+        const ids = subtree.map(item => item.id)
+        const collections = await tx.dataCollection.findMany({ where: { categoryId: { in: ids }, archivedAt: null }, select: { id: true } })
+        const collectionIds = collections.map(item => item.id)
+        await Promise.all([
+          tx.category.updateMany({ where: { id: { in: ids }, archivedAt: null }, data: { archivedAt } }),
+          tx.dataCollection.updateMany({ where: { id: { in: collectionIds }, archivedAt: null }, data: { archivedAt } }),
+          tx.dataRecord.updateMany({ where: { categoryId: { in: ids }, archivedAt: null }, data: { archivedAt } }),
+          tx.document.updateMany({ where: { categoryId: { in: ids }, archivedAt: null }, data: { archivedAt } }),
         ])
-        if (children || dataRecords || documents) {
-          throw new DomainError(409, 'CATEGORY_NOT_EMPTY', 'Move or archive active child categories, data, and documents before archiving this category', { children, dataRecords, documents })
-        }
-        const updated = await tx.category.update({ where: { id }, data: { archivedAt: new Date() } })
-        await createAuditService(tx).record({ action: 'CATEGORY_ARCHIVED', entityType: 'Category', entityId: id, actorId, before: clean(category), after: clean(updated) })
+        const updated = { ...category, archivedAt }
+        await createAuditService(tx).record({ action: 'CATEGORY_ARCHIVED', entityType: 'Category', entityId: id, actorId, before: clean(category), after: clean(updated), metadata: { subtreeCategories: ids.length, dataCollections: collectionIds.length } })
         return clean(updated)
       })
     },
 
     async restore(id, actorId) {
       return prisma.$transaction(async tx => {
-        const category = await tx.category.findUnique({ where: { id } })
-        if (!category) throw notFound('Category')
+        const subtree = await categorySubtree(tx, id)
+        const category = subtree[0]
         if (!category.archivedAt) return clean(category)
         if (category.parentId) {
           const parent = await tx.category.findUnique({ where: { id: category.parentId } })
@@ -187,8 +204,18 @@ export function createCategoryService(prisma) {
         if (await siblingExists(tx, { name: category.name, parentId: category.parentId, excludeId: id })) {
           throw new DomainError(409, 'DUPLICATE_CATEGORY', 'An active category with this name already exists in the selected location')
         }
-        const updated = await tx.category.update({ where: { id }, data: { archivedAt: null } })
-        await createAuditService(tx).record({ action: 'CATEGORY_RESTORED', entityType: 'Category', entityId: id, actorId, before: clean(category), after: clean(updated) })
+        const deletedAt = category.archivedAt
+        const ids = subtree.filter(item => item.archivedAt?.getTime() === deletedAt.getTime()).map(item => item.id)
+        const collections = await tx.dataCollection.findMany({ where: { categoryId: { in: ids }, archivedAt: deletedAt }, select: { id: true } })
+        const collectionIds = collections.map(item => item.id)
+        await Promise.all([
+          tx.category.updateMany({ where: { id: { in: ids }, archivedAt: deletedAt }, data: { archivedAt: null } }),
+          tx.dataCollection.updateMany({ where: { id: { in: collectionIds }, archivedAt: deletedAt }, data: { archivedAt: null } }),
+          tx.dataRecord.updateMany({ where: { categoryId: { in: ids }, archivedAt: deletedAt }, data: { archivedAt: null } }),
+          tx.document.updateMany({ where: { categoryId: { in: ids }, archivedAt: deletedAt }, data: { archivedAt: null } }),
+        ])
+        const updated = { ...category, archivedAt: null }
+        await createAuditService(tx).record({ action: 'CATEGORY_RESTORED', entityType: 'Category', entityId: id, actorId, before: clean(category), after: clean(updated), metadata: { subtreeCategories: ids.length, dataCollections: collectionIds.length } })
         return clean(updated)
       })
     },
