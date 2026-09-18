@@ -6,10 +6,11 @@ export function getToken() {
 
 export async function api(path, options = {}) {
   const token = getToken()
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
@@ -23,6 +24,16 @@ export async function api(path, options = {}) {
     throw error
   }
   return payload.data
+}
+
+export async function apiBlob(path) {
+  const token = getToken()
+  const response = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    throw new Error(payload.error?.message || 'ဖိုင်ကို ဖွင့်၍မရပါ')
+  }
+  return response.blob()
 }
 
 export async function login(email, password) {

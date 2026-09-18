@@ -1,251 +1,428 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
-import AddRounded from '@mui/icons-material/AddRounded'
-import ArchiveOutlined from '@mui/icons-material/ArchiveOutlined'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
 import CloseRounded from '@mui/icons-material/CloseRounded'
-import DescriptionRounded from '@mui/icons-material/DescriptionRounded'
+import ContentCutRounded from '@mui/icons-material/ContentCutRounded'
+import CreateNewFolderOutlined from '@mui/icons-material/CreateNewFolderOutlined'
 import DriveFileMoveOutlined from '@mui/icons-material/DriveFileMoveOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import FolderOpenRounded from '@mui/icons-material/FolderOpenRounded'
 import FolderRounded from '@mui/icons-material/FolderRounded'
+import GridViewRounded from '@mui/icons-material/GridViewRounded'
 import HomeRounded from '@mui/icons-material/HomeRounded'
+import ImageRounded from '@mui/icons-material/ImageRounded'
+import InfoOutlined from '@mui/icons-material/InfoOutlined'
+import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded'
 import MoreVertRounded from '@mui/icons-material/MoreVertRounded'
-import RestoreRounded from '@mui/icons-material/RestoreRounded'
+import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded'
+import PictureAsPdfRounded from '@mui/icons-material/PictureAsPdfRounded'
 import SearchRounded from '@mui/icons-material/SearchRounded'
-import StorageRounded from '@mui/icons-material/StorageRounded'
-import { flattenCategories } from './category-utils.js'
-import { useCategoryDetails, useCategoryMutation, useCategoryTree } from './category-queries.js'
+import SortRounded from '@mui/icons-material/SortRounded'
+import TableChartRounded from '@mui/icons-material/TableChartRounded'
+import UploadFileRounded from '@mui/icons-material/UploadFileRounded'
+import ViewListRounded from '@mui/icons-material/ViewListRounded'
+import { api, apiBlob } from '../api.js'
+import { categoryKeys, useCategoryMutation, useCategoryTree, useFolderContents } from './category-queries.js'
+import { categoryDescendantIds, filterAndSortItems, flattenCategories, isEditingTarget, normalizeFileManagerItems } from './category-utils.js'
 import './categories.css'
 
-const dialogTitles = {
-  root: 'ပင်မအမျိုးအစားအသစ် ထည့်ရန်',
-  child: 'အောက်ခံအမျိုးအစားအသစ် ထည့်ရန်',
-  edit: 'အမျိုးအစားအချက်အလက် ပြင်ဆင်ရန်',
-  move: 'အမျိုးအစားနေရာ ရွှေ့ရန်',
-  archive: 'အမျိုးအစား Archive ပြုလုပ်ရန်',
-  restore: 'အမျိုးအစား ပြန်လည်အသုံးပြုရန်',
+const itemKey = item => `${item.itemType}:${item.id}`
+const user = () => JSON.parse(sessionStorage.getItem('office_user') || '{}')
+
+function ItemIcon({ type }) {
+  if (type === 'FOLDER') return <FolderRounded />
+  if (type === 'DATA') return <TableChartRounded />
+  if (type === 'PDF') return <PictureAsPdfRounded />
+  return <ImageRounded />
+}
+
+function FolderTree({ nodes, selectedId, expanded, onToggle, onSelect, depth = 0 }) {
+  return nodes.map(node => {
+    const opened = expanded.has(node.id)
+    const hasChildren = Boolean(node.children?.length)
+    return <div className="fm-tree-branch" key={node.id}>
+      <div className={`fm-tree-row ${selectedId === node.id ? 'selected' : ''}`} style={/** @type {import('react').CSSProperties} */ ({ '--tree-depth': depth })}>
+        <button type="button" className="fm-tree-toggle" onClick={() => hasChildren && onToggle(node.id)} disabled={!hasChildren} aria-label={opened ? 'Folder ခေါက်ရန်' : 'Folder ဖြန့်ရန်'}>
+          {hasChildren && (opened ? <ExpandMoreRounded /> : <ChevronRightRounded />)}
+        </button>
+        <button type="button" className="fm-tree-name" onClick={() => onSelect(node.id)} onDoubleClick={() => hasChildren && onToggle(node.id)}>
+          {opened ? <FolderOpenRounded /> : <FolderRounded />}<span>{node.name}</span>
+        </button>
+      </div>
+      {opened && hasChildren && <FolderTree nodes={node.children} selectedId={selectedId} expanded={expanded} onToggle={onToggle} onSelect={onSelect} depth={depth + 1} />}
+    </div>
+  })
+}
+
+function MoveDialog({ items, tree, onClose, onConfirm, busy, error }) {
+  const onlyFolders = items.every(item => item.itemType === 'FOLDER')
+  const blocked = useMemo(() => {
+    const ids = new Set()
+    for (const item of items) {
+      if (item.itemType !== 'FOLDER') continue
+      ids.add(item.id)
+      const node = flattenCategories(tree).find(folder => folder.id === item.id)
+      categoryDescendantIds(node, ids)
+    }
+    return ids
+  }, [items, tree])
+  const [query, setQuery] = useState('')
+  const [target, setTarget] = useState(onlyFolders ? '' : null)
+  const destinations = useMemo(() => flattenCategories(tree).filter(folder => !blocked.has(folder.id) && folder.path.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [blocked, query, tree])
+  return <div className="fm-dialog-backdrop" onMouseDown={event => event.target === event.currentTarget && !busy && onClose()}>
+    <section className="fm-dialog fm-move-dialog" role="dialog" aria-modal="true" aria-labelledby="move-dialog-title">
+      <header><div><small>File Manager</small><h2 id="move-dialog-title">Move to</h2></div><button onClick={onClose} disabled={busy} aria-label="ပိတ်ရန်"><CloseRounded /></button></header>
+      <div className="fm-dialog-body">
+        <p className="fm-dialog-note"><DriveFileMoveOutlined /><span><b>{items.length} item{items.length > 1 ? 's' : ''}</b><small>ရွှေ့လိုသည့် Folder ကို ရွေးပါ</small></span></p>
+        <label className="fm-dialog-search"><SearchRounded /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Folder ရှာရန်…" autoFocus /></label>
+        <div className="fm-destination-list">
+          {onlyFolders && <button className={target === '' ? 'selected' : ''} onClick={() => setTarget('')}><HomeRounded /><span><b>Home</b><small>Root location</small></span></button>}
+          {destinations.map(folder => <button key={folder.id} className={target === folder.id ? 'selected' : ''} onClick={() => setTarget(folder.id)}><FolderRounded /><span><b>{folder.name}</b><small>{folder.path}</small></span></button>)}
+        </div>
+        {error && <p className="fm-error" role="alert">{error}</p>}
+      </div>
+      <footer><button onClick={onClose} disabled={busy}>Cancel</button><button className="primary" disabled={target === null || busy} onClick={() => onConfirm(target)}>{busy ? 'Moving…' : 'Move here'}</button></footer>
+    </section>
+  </div>
+}
+
+function DetailsDialog({ item, location, onClose }) {
+  const rows = item.itemType === 'FOLDER'
+    ? [['Type', 'Folder'], ['Location', location], ['Items', item.sizeLabel], ['Created', formatDate(item.createdAt)], ['Modified', formatDate(item.updatedAt)]]
+    : item.itemType === 'DATA'
+      ? [['Type', 'Structured Data'], ['Location', location], ['Records', item.sizeLabel], ['Fields', `${item.fields?.length || 0}`], ['Access', item.defaultAccessLevel], ['Modified', formatDate(item.updatedAt)]]
+      : [['Type', item.typeLabel], ['File name', item.fileName], ['Location', location], ['Size', item.sizeLabel], ['Access', item.accessLevel], ['Uploaded', formatDate(item.createdAt)], ['Modified', formatDate(item.updatedAt)]]
+  return <div className="fm-dialog-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+    <section className="fm-dialog fm-details-dialog" role="dialog" aria-modal="true" aria-labelledby="details-dialog-title">
+      <header><div><small>Details</small><h2 id="details-dialog-title">{item.name}</h2></div><button onClick={onClose} aria-label="ပိတ်ရန်"><CloseRounded /></button></header>
+      <div className="fm-details-hero"><span className={`fm-item-icon ${item.itemType.toLowerCase()}`}><ItemIcon type={item.itemType} /></span><div><b>{item.name}</b><small>{item.typeLabel}</small></div></div>
+      <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || '—'}</dd></div>)}</dl>
+      <footer><button className="primary" onClick={onClose}>Done</button></footer>
+    </section>
+  </div>
+}
+
+function UploadDialog({ upload, setUpload, folderId, onDone }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function close() {
+    if (upload.mode === 'excel' && upload.job?.id && upload.job.status !== 'COMPLETED') api(`/admin/imports/${upload.job.id}/cancel`, { method: 'POST' }).catch(() => {})
+    setUpload(null)
+  }
+
+  async function inspectSheet() {
+    setBusy(true); setError('')
+    try {
+      const job = await api(`/admin/imports/${upload.job.id}/inspect`, { method: 'POST', body: JSON.stringify({ sheetName: upload.sheetName }) })
+      setUpload(current => ({ ...current, job }))
+    } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
+  }
+
+  async function confirm() {
+    setBusy(true); setError('')
+    try {
+      if (upload.mode === 'document') {
+        const body = new FormData()
+        body.append('file', upload.file)
+        body.append('title', upload.title.trim())
+        body.append('categoryId', folderId)
+        body.append('accessLevel', upload.accessLevel)
+        await api('/admin/documents', { method: 'POST', body })
+      } else {
+        const job = await api(`/admin/imports/${upload.job.id}/commit`, { method: 'POST', body: JSON.stringify({ collectionName: upload.collectionName.trim(), defaultAccessLevel: upload.accessLevel }) })
+        setUpload(current => ({ ...current, job }))
+      }
+      onDone()
+      setUpload(null)
+    } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
+  }
+
+  const inspection = upload.job?.inspection || {}
+  const preview = inspection.preview || []
+  const fields = inspection.fields || []
+  const needsSheet = Boolean(inspection.requiresSheetSelection)
+  return <div className="fm-dialog-backdrop">
+    <section className="fm-dialog fm-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title">
+      <header><div><small>Add File</small><h2 id="upload-dialog-title">{upload.mode === 'excel' ? 'Import Excel Data' : 'Upload Document'}</h2></div><button onClick={close} disabled={busy} aria-label="ပိတ်ရန်"><CloseRounded /></button></header>
+      <div className="fm-dialog-body">
+        <p className="fm-dialog-note">{upload.mode === 'excel' ? <TableChartRounded /> : upload.file.type === 'application/pdf' ? <PictureAsPdfRounded /> : <ImageRounded />}<span><b>{upload.file?.name || upload.job?.originalFileName}</b><small>{upload.mode === 'excel' ? 'Database ထဲသို့ structured data အဖြစ် import လုပ်မည်' : 'ရွေးထားသည့် Folder ထဲသို့ upload လုပ်မည်'}</small></span></p>
+        {upload.mode === 'document' ? <>
+          <label className="fm-field">Title<input value={upload.title} onChange={event => setUpload(current => ({ ...current, title: event.target.value }))} autoFocus /></label>
+          <label className="fm-field">Access<select value={upload.accessLevel} onChange={event => setUpload(current => ({ ...current, accessLevel: event.target.value }))}><option value="NORMAL">Normal</option><option value="VIP">VIP</option><option value="ADMIN">Admin only</option></select></label>
+        </> : <>
+          {needsSheet ? <div className="fm-sheet-select"><label className="fm-field">Worksheet<select value={upload.sheetName} onChange={event => setUpload(current => ({ ...current, sheetName: event.target.value }))}>{inspection.sheets?.map(sheet => <option key={sheet.name}>{sheet.name}</option>)}</select></label><button onClick={inspectSheet} disabled={busy}>Preview sheet</button></div> : <>
+            <label className="fm-field">Data name<input value={upload.collectionName} onChange={event => setUpload(current => ({ ...current, collectionName: event.target.value }))} /></label>
+            <label className="fm-field">Access<select value={upload.accessLevel} onChange={event => setUpload(current => ({ ...current, accessLevel: event.target.value }))}><option value="NORMAL">Normal</option><option value="VIP">VIP</option><option value="ADMIN">Admin only</option></select></label>
+            <div className="fm-import-summary"><span><b>{upload.job.validRows || 0}</b> valid rows</span><span className={upload.job.invalidRows ? 'danger' : ''}><b>{upload.job.invalidRows || 0}</b> invalid rows</span><span><b>{fields.length}</b> fields</span></div>
+            {preview.length > 0 && <div className="fm-preview-table"><table><thead><tr><th>#</th>{fields.map(field => <th key={field.key}>{field.label}</th>)}</tr></thead><tbody>{preview.slice(0, 6).map(row => <tr key={row.rowNumber}><td>{row.rowNumber}</td>{fields.map(field => <td key={field.key}>{String(row.data[field.key] ?? '')}</td>)}</tr>)}</tbody></table></div>}
+          </>}
+        </>}
+        {error && <p className="fm-error" role="alert">{error}</p>}
+      </div>
+      <footer><button onClick={close} disabled={busy}>Cancel</button><button className="primary" onClick={confirm} disabled={busy || (upload.mode === 'document' ? !upload.title.trim() : needsSheet || !upload.collectionName.trim() || upload.job.invalidRows > 0)}>{busy ? 'Working…' : upload.mode === 'excel' ? 'Import data' : 'Upload'}</button></footer>
+    </section>
+  </div>
+}
+
+function ContextMenu({ menu, onClose, onOpen, onRename, onMove, onCut, onDetails }) {
+  useEffect(() => {
+    const close = () => onClose()
+    window.addEventListener('click', close)
+    window.addEventListener('resize', close)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('resize', close) }
+  }, [onClose])
+  return <div className="fm-context-menu" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()} role="menu">
+    <button onClick={onOpen}><OpenInNewRounded />Open</button>
+    <button onClick={onRename}><EditOutlined />Rename</button>
+    <button onClick={onMove}><DriveFileMoveOutlined />Move to…</button>
+    <button onClick={onCut}><ContentCutRounded />Cut <kbd>Ctrl + X</kbd></button>
+    <button onClick={onDetails}><InfoOutlined />Details</button>
+  </div>
+}
+
+export default function Categories({ onViewData }) {
+  const queryClient = useQueryClient()
+  const categoryMutation = useCategoryMutation()
+  const fileInput = useRef(null)
+  const newFolderBlurAction = useRef('')
+  const renameBlurAction = useRef('')
+  const [selectedFolderId, setSelectedFolderId] = useState(null)
+  const [expanded, setExpanded] = useState(new Set())
+  const [selection, setSelection] = useState(new Set())
+  const [cutItems, setCutItems] = useState([])
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState('name')
+  const [view, setView] = useState('list')
+  const [newFolder, setNewFolder] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [rename, setRename] = useState(null)
+  const [menu, setMenu] = useState(null)
+  const [moveItems, setMoveItems] = useState(null)
+  const [detailsItem, setDetailsItem] = useState(null)
+  const [upload, setUpload] = useState(null)
+  const [uploadFolderId, setUploadFolderId] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const treeQuery = useCategoryTree()
+  const contentsQuery = useFolderContents(selectedFolderId)
+  const tree = useMemo(() => treeQuery.data || [], [treeQuery.data])
+  const contents = useMemo(() => selectedFolderId ? contentsQuery.data : { folders: tree, dataItems: [], documents: [], breadcrumb: [] }, [contentsQuery.data, selectedFolderId, tree])
+  const allItems = useMemo(() => normalizeFileManagerItems(contents || {}), [contents])
+  const visibleItems = useMemo(() => filterAndSortItems(allItems, search, sortBy), [allItems, search, sortBy])
+  const selectedItems = useMemo(() => allItems.filter(item => selection.has(itemKey(item))), [allItems, selection])
+  const location = selectedFolderId ? `Home / ${(contents?.breadcrumb || []).map(item => item.name).join(' / ')}` : 'Home'
+  const cutKeys = useMemo(() => new Set(cutItems.map(itemKey)), [cutItems])
+  const displayedExpanded = useMemo(() => expanded.size ? expanded : new Set(tree.map(folder => folder.id)), [expanded, tree])
+  const canManage = user().role === 'ADMIN'
+  useEffect(() => {
+    if (!notice) return undefined
+    const timer = setTimeout(() => setNotice(''), 2800)
+    return () => clearTimeout(timer)
+  }, [notice])
+
+  async function refresh() {
+    await queryClient.invalidateQueries({ queryKey: categoryKeys.all })
+  }
+
+  function toggleTree(id) {
+    setExpanded(current => { const next = new Set(current.size ? current : tree.map(folder => folder.id)); next.has(id) ? next.delete(id) : next.add(id); return next })
+  }
+
+  function navigateToFolder(id) {
+    setSelectedFolderId(id)
+    setSelection(new Set())
+    setMenu(null)
+    setNewFolder(false)
+    setRename(null)
+    setSearch('')
+  }
+
+  function selectItem(event, item) {
+    const key = itemKey(item)
+    setSelection(current => {
+      if (!event.ctrlKey && !event.metaKey) return new Set([key])
+      const next = new Set(current); next.has(key) ? next.delete(key) : next.add(key); return next
+    })
+  }
+
+  async function openItem(item) {
+    setMenu(null)
+    if (item.itemType === 'FOLDER') { navigateToFolder(item.id); return }
+    if (item.itemType === 'DATA') { onViewData?.(item.categoryId, item.id); return }
+    try {
+      const blob = await apiBlob(`/documents/${item.id}/download`)
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a'); anchor.href = url; anchor.target = '_blank'; anchor.rel = 'noopener noreferrer'; anchor.click()
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (requestError) { setError(requestError.message) }
+  }
+
+  function openMenu(event, item) {
+    event.preventDefault(); event.stopPropagation()
+    const key = itemKey(item)
+    if (!selection.has(key)) setSelection(new Set([key]))
+    const x = Math.min(event.clientX, window.innerWidth - 210)
+    const y = Math.min(event.clientY, window.innerHeight - 250)
+    setMenu({ x, y, item })
+  }
+
+  async function createFolder() {
+    const name = newFolderName.trim()
+    setNewFolder(false); setNewFolderName('')
+    if (!name) return
+    try {
+      await categoryMutation.mutateAsync({ mode: selectedFolderId ? 'child' : 'root', category: { id: selectedFolderId }, values: { name, ...(selectedFolderId ? { parentId: selectedFolderId } : {}) } })
+      setNotice('Folder created')
+    } catch (requestError) { setError(requestError.message) }
+  }
+
+  async function renameItem(item, name) {
+    const cleanName = name.trim()
+    setRename(null)
+    if (!cleanName || cleanName === item.name) return
+    setBusy(true); setError('')
+    try {
+      if (item.itemType === 'FOLDER') await categoryMutation.mutateAsync({ mode: 'edit', category: item, values: { name: cleanName } })
+      else if (item.itemType === 'DATA') await api(`/admin/data/collections/${item.id}`, { method: 'PATCH', body: JSON.stringify({ name: cleanName }) })
+      else await api(`/admin/documents/${item.id}`, { method: 'PATCH', body: JSON.stringify({ title: cleanName }) })
+      await refresh(); setNotice('Renamed successfully')
+    } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
+  }
+
+  async function move(item, targetFolderId) {
+    if (item.itemType === 'FOLDER') return categoryMutation.mutateAsync({ mode: 'move', category: item, values: { parentId: targetFolderId || null } })
+    if (!targetFolderId) throw new Error('Data နှင့် Document ကို Home root သို့ မရွှေ့နိုင်ပါ။ Folder တစ်ခုရွေးပါ။')
+    if (item.itemType === 'DATA') return api(`/admin/data/collections/${item.id}`, { method: 'PATCH', body: JSON.stringify({ categoryId: targetFolderId }) })
+    return api(`/admin/documents/${item.id}`, { method: 'PATCH', body: JSON.stringify({ categoryId: targetFolderId }) })
+  }
+
+  async function confirmMove(targetFolderId, items = moveItems || []) {
+    setBusy(true); setError('')
+    try {
+      for (const item of items) await move(item, targetFolderId)
+      setMoveItems(null); setCutItems([]); setSelection(new Set()); await refresh(); setNotice('Items moved successfully')
+    } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
+  }
+
+  function startRename(item = selectedItems[0]) {
+    if (!item || selectedItems.length > 1) return
+    renameBlurAction.current = ''
+    setMenu(null); setRename({ key: itemKey(item), name: item.name, item })
+  }
+
+  function cut(items = selectedItems) {
+    if (!items.length) return
+    setCutItems(items); setMenu(null); setNotice(`${items.length} item cut — destination Folder တွင် Ctrl + V နှိပ်ပါ`)
+  }
+
+  async function chooseFile(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !uploadFolderId) return
+    setError('')
+    if (file.name.toLocaleLowerCase().endsWith('.xlsx')) {
+      setBusy(true)
+      try {
+        const body = new FormData(); body.append('file', file); body.append('categoryId', uploadFolderId)
+        const job = await api('/admin/imports/excel/inspect', { method: 'POST', body })
+        setUpload({ mode: 'excel', file, job, collectionName: file.name.replace(/\.xlsx$/i, ''), accessLevel: 'NORMAL', sheetName: job.inspection?.sheets?.[0]?.name || '' })
+      } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
+    } else {
+      setUpload({ mode: 'document', file, title: file.name.replace(/\.(pdf|jpe?g)$/i, ''), accessLevel: 'NORMAL' })
+    }
+  }
+
+  function requestAddFile() {
+    const selectedFolder = selectedItems.length === 1 && selectedItems[0].itemType === 'FOLDER' ? selectedItems[0].id : null
+    const targetFolderId = selectedFolderId || selectedFolder
+    if (!targetFolderId) { setNotice('ဖိုင်ထည့်မည့် Folder ကို အရင်ရွေးပါ'); return }
+    setUploadFolderId(targetFolderId)
+    fileInput.current?.click()
+  }
+
+  function requestMove() {
+    if (!selectedItems.length) { setNotice('ရွှေ့လိုသည့် item ကို အရင်ရွေးပါ'); return }
+    setMoveItems(selectedItems)
+  }
+
+  useEffect(() => {
+    const keydown = event => {
+      if (isEditingTarget(event.target)) return
+      const command = event.ctrlKey || event.metaKey
+      if (command && event.shiftKey && event.key.toLocaleLowerCase() === 'n') { event.preventDefault(); if (canManage) { newFolderBlurAction.current = ''; setNewFolder(true); setNewFolderName('') } }
+      else if (command && event.key.toLocaleLowerCase() === 'a') { event.preventDefault(); setSelection(new Set(visibleItems.map(itemKey))) }
+      else if (command && event.key.toLocaleLowerCase() === 'x') { event.preventDefault(); cut() }
+      else if (command && event.key.toLocaleLowerCase() === 'v') { event.preventDefault(); if (cutItems.length) confirmMove(selectedFolderId, cutItems) }
+      else if (event.key === 'F2') { event.preventDefault(); startRename() }
+      else if (event.key === 'Enter' && selectedItems.length === 1) { event.preventDefault(); openItem(selectedItems[0]) }
+      else if (event.key === 'Escape') { newFolderBlurAction.current = 'cancel'; renameBlurAction.current = 'cancel'; setSelection(new Set()); setCutItems([]); setMenu(null); setNewFolder(false); setRename(null) }
+    }
+    window.addEventListener('keydown', keydown)
+    return () => window.removeEventListener('keydown', keydown)
+  })
+
+  const loading = treeQuery.isLoading || (selectedFolderId && contentsQuery.isLoading)
+  const pageError = treeQuery.error || contentsQuery.error
+  return <section className="file-manager" onClick={() => setMenu(null)}>
+    <aside className="fm-sidebar">
+      <h2>Folders</h2>
+      <div className={`fm-tree-row home ${selectedFolderId === null ? 'selected' : ''}`}><span className="fm-tree-spacer" /><button className="fm-tree-name" onClick={() => navigateToFolder(null)}><HomeRounded /><span>Home</span></button></div>
+      <div className="fm-tree-scroll">
+        {treeQuery.isLoading ? <div className="fm-tree-loading"><i /><i /><i /><i /></div> : tree.length ? <FolderTree nodes={tree} selectedId={selectedFolderId} expanded={displayedExpanded} onToggle={toggleTree} onSelect={navigateToFolder} /> : <p className="fm-empty-tree">Folder မရှိသေးပါ</p>}
+      </div>
+    </aside>
+
+    <main className="fm-main">
+      <div className="fm-toolbar">
+        <div className="fm-toolbar-primary">
+          <button className="primary" onClick={() => { newFolderBlurAction.current = ''; setNewFolder(true); setNewFolderName('') }} disabled={!canManage}><CreateNewFolderOutlined />New Folder<KeyboardArrowDownRounded /></button>
+          <button onClick={requestAddFile} disabled={!canManage || busy}><UploadFileRounded />Add File<KeyboardArrowDownRounded /></button>
+          <input ref={fileInput} type="file" accept=".xlsx,.pdf,.jpg,.jpeg" onChange={chooseFile} hidden />
+          <button onClick={requestMove} disabled={!canManage}><DriveFileMoveOutlined />Move to</button>
+        </div>
+        <div className="fm-toolbar-tools">
+          <label className="fm-search"><SearchRounded /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search in this folder…" /></label>
+          <label className="fm-sort"><SortRounded /><span>Sort</span><select value={sortBy} onChange={event => setSortBy(event.target.value)} aria-label="Sort items"><option value="name">Name</option><option value="type">Type</option><option value="updated">Last Modified</option></select><KeyboardArrowDownRounded /></label>
+          <div className="fm-view-toggle"><button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')} aria-label="List view"><ViewListRounded /></button><button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')} aria-label="Grid view"><GridViewRounded /></button></div>
+        </div>
+      </div>
+
+      <div className="fm-content" onClick={event => event.target === event.currentTarget && setSelection(new Set())}>
+        {error && <div className="fm-inline-error" role="alert"><span>{error}</span><button onClick={() => setError('')}><CloseRounded /></button></div>}
+        {pageError ? <div className="fm-state error"><InfoOutlined /><b>Folder contents မဖွင့်နိုင်ပါ</b><span>{pageError.message}</span><button onClick={() => { treeQuery.refetch(); contentsQuery.refetch() }}>Try again</button></div>
+          : loading ? <div className="fm-list-loading"><i /><i /><i /><i /><i /></div>
+            : view === 'list' ? <div className="fm-list" role="grid" aria-label="Current folder contents">
+              <div className="fm-list-head" role="row"><span>Name</span><span>Type</span><span>Size / Records</span><span>Last Modified</span><span>Modified By</span><span /></div>
+              {newFolder && <div className="fm-row editing"><span className="fm-name-cell"><span className="fm-item-icon folder"><FolderRounded /></span><input value={newFolderName} onChange={event => setNewFolderName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); newFolderBlurAction.current = 'save'; createFolder() } if (event.key === 'Escape') { newFolderBlurAction.current = 'cancel'; setNewFolder(false) } }} onBlur={() => { if (newFolderBlurAction.current) { newFolderBlurAction.current = ''; return } createFolder() }} autoFocus placeholder="New folder" /></span><span>Folder</span><span>0 items</span><span>—</span><span>{user().name || 'Administrator'}</span><span /></div>}
+              {visibleItems.map(item => {
+                const key = itemKey(item); const selected = selection.has(key); const editing = rename?.key === key
+                return <div className={`fm-row ${selected ? 'selected' : ''} ${cutKeys.has(key) ? 'cut' : ''}`} role="row" tabIndex={0} key={key} onClick={event => selectItem(event, item)} onDoubleClick={() => openItem(item)} onContextMenu={event => openMenu(event, item)}>
+                  <span className="fm-name-cell"><span className={`fm-item-icon ${item.itemType.toLowerCase()}`}><ItemIcon type={item.itemType} /></span>{editing ? <input value={rename.name} onChange={event => setRename(current => ({ ...current, name: event.target.value }))} onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Enter') { renameBlurAction.current = 'save'; renameItem(item, rename.name) } if (event.key === 'Escape') { renameBlurAction.current = 'cancel'; setRename(null) } }} onBlur={() => { if (renameBlurAction.current) { renameBlurAction.current = ''; return } renameItem(item, rename.name) }} autoFocus /> : <b>{item.name}</b>}</span>
+                  <span><em className={`fm-type ${item.itemType.toLowerCase()}`}>{item.typeLabel}</em></span><span>{item.sizeLabel}</span><span>{formatDate(item.updatedAt)}</span><span>{item.modifiedBy}</span>
+                  <span><button className="fm-kebab" onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); openMenu({ ...event, clientX: rect.right - 8, clientY: rect.bottom + 4, preventDefault: () => event.preventDefault(), stopPropagation: () => event.stopPropagation() }, item) }} aria-label={`${item.name} actions`}><MoreVertRounded /></button></span>
+                </div>
+              })}
+              {!newFolder && !visibleItems.length && <div className="fm-state"><FolderOpenRounded /><b>This folder is empty</b><span>New Folder ဖန်တီးပါ သို့မဟုတ် File ထည့်ပါ</span></div>}
+            </div> : <div className="fm-grid">
+              {newFolder && <article className="fm-grid-card editing"><span className="fm-item-icon folder"><FolderRounded /></span><input value={newFolderName} onChange={event => setNewFolderName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { newFolderBlurAction.current = 'save'; createFolder() } if (event.key === 'Escape') { newFolderBlurAction.current = 'cancel'; setNewFolder(false) } }} onBlur={() => { if (newFolderBlurAction.current) { newFolderBlurAction.current = ''; return } createFolder() }} autoFocus placeholder="New folder" /></article>}
+              {visibleItems.map(item => { const key = itemKey(item); return <article key={key} className={`fm-grid-card ${selection.has(key) ? 'selected' : ''} ${cutKeys.has(key) ? 'cut' : ''}`} onClick={event => selectItem(event, item)} onDoubleClick={() => openItem(item)} onContextMenu={event => openMenu(event, item)}><span className={`fm-item-icon ${item.itemType.toLowerCase()}`}><ItemIcon type={item.itemType} /></span><div>{rename?.key === key ? <input value={rename.name} onChange={event => setRename(current => ({ ...current, name: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') { renameBlurAction.current = 'save'; renameItem(item, rename.name) } if (event.key === 'Escape') { renameBlurAction.current = 'cancel'; setRename(null) } }} onBlur={() => { if (renameBlurAction.current) { renameBlurAction.current = ''; return } renameItem(item, rename.name) }} autoFocus /> : <b>{item.name}</b>}<small>{item.typeLabel} · {item.sizeLabel}</small></div><button className="fm-kebab" onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); openMenu({ ...event, clientX: rect.right - 8, clientY: rect.bottom + 4, preventDefault: () => event.preventDefault(), stopPropagation: () => event.stopPropagation() }, item) }}><MoreVertRounded /></button></article>})}
+            </div>}
+      </div>
+      <footer className="fm-status"><span>{visibleItems.length} item{visibleItems.length === 1 ? '' : 's'}{selection.size ? ` · ${selection.size} selected` : ''}</span><div><span><kbd>Ctrl + A</kbd> Select all</span><span><kbd>Ctrl + X</kbd> Cut</span><span><kbd>Ctrl + V</kbd> Paste (Move)</span><span><kbd>Ctrl + Shift + N</kbd> New Folder</span><span><kbd>F2</kbd> Rename</span><span><kbd>Enter</kbd> Open</span></div></footer>
+    </main>
+
+    {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} onOpen={() => openItem(menu.item)} onRename={() => startRename(menu.item)} onMove={() => { setMoveItems(selection.has(itemKey(menu.item)) ? selectedItems : [menu.item]); setMenu(null) }} onCut={() => cut(selection.has(itemKey(menu.item)) ? selectedItems : [menu.item])} onDetails={() => { setDetailsItem(menu.item); setMenu(null) }} />}
+    {moveItems && <MoveDialog items={moveItems} tree={tree} onClose={() => { setMoveItems(null); setError('') }} onConfirm={confirmMove} busy={busy} error={error} />}
+    {detailsItem && <DetailsDialog item={detailsItem} location={location} onClose={() => setDetailsItem(null)} />}
+    {upload && <UploadDialog upload={upload} setUpload={setUpload} folderId={uploadFolderId} onDone={async () => { await refresh(); setNotice('File added successfully') }} />}
+    {notice && <div className="fm-toast">{notice}</div>}
+  </section>
 }
 
 function formatDate(value) {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('my-MM', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
-}
-
-function CategoryTree({ nodes, selectedId, expanded, onToggle, onSelect, depth = 0 }) {
-  return nodes.map(node => {
-    const hasChildren = Boolean(node.children?.length)
-    const isOpen = expanded.has(node.id)
-    return <div className="category-tree-branch" key={node.id}>
-      <div className={`category-tree-row ${selectedId === node.id ? 'selected' : ''} ${node.archivedAt ? 'archived' : ''}`} style={/** @type {import('react').CSSProperties} */ ({ '--depth': depth })}>
-        <button className="tree-toggle" type="button" onClick={() => hasChildren && onToggle(node.id)} aria-label={hasChildren ? (isOpen ? 'အမျိုးအစားခေါက်ရန်' : 'အမျိုးအစားဖြန့်ရန်') : undefined} disabled={!hasChildren}>
-          {hasChildren && (isOpen ? <ExpandMoreRounded /> : <ChevronRightRounded />)}
-        </button>
-        <button className="tree-select" type="button" onClick={() => onSelect(node.id)} aria-current={selectedId === node.id ? 'page' : undefined}>
-          {isOpen && hasChildren ? <FolderOpenRounded /> : <FolderRounded />}
-          <b>{node.name}</b>
-        </button>
-        <span className="tree-count" title="ဒေတာနှင့် စာရွက်စာတမ်း စုစုပေါင်း">{node.dataCount + node.documentCount}</span>
-      </div>
-      {hasChildren && isOpen && <CategoryTree nodes={node.children} selectedId={selectedId} expanded={expanded} onToggle={onToggle} onSelect={onSelect} depth={depth + 1} />}
-    </div>
-  })
-}
-
-function CategoryDialog({ mode, category, tree, onClose }) {
-  const mutation = useCategoryMutation()
-  const [name, setName] = useState(category?.name || '')
-  const [description, setDescription] = useState(category?.description || '')
-  const [destination, setDestination] = useState('')
-  const unavailable = useMemo(() => {
-    if (!category) return new Set()
-    const blocked = new Set([category.id])
-    const visit = nodes => nodes.forEach(node => {
-      if (blocked.has(node.id)) flattenCategories(node.children || []).forEach(child => blocked.add(child.id))
-      else visit(node.children || [])
-    })
-    visit(tree)
-    return blocked
-  }, [category, tree])
-  const destinations = useMemo(() => flattenCategories(tree).filter(item => !item.archivedAt && !unavailable.has(item.id)), [tree, unavailable])
-
-  useEffect(() => {
-    const closeOnEscape = event => event.key === 'Escape' && !mutation.isPending && onClose()
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [mutation.isPending, onClose])
-
-  async function submit(event) {
-    event.preventDefault()
-    let values
-    if (mode === 'root') values = { name: name.trim(), description: description.trim() || null }
-    if (mode === 'child') values = { name: name.trim(), description: description.trim() || null, parentId: category.id }
-    if (mode === 'edit') values = { name: name.trim(), description: description.trim() || null }
-    if (mode === 'move') values = { parentId: destination || null }
-    try {
-      await mutation.mutateAsync({ mode, category, values })
-      onClose()
-    } catch {
-      // The mutation error remains visible in the dialog for correction or retry.
-    }
-  }
-
-  const error = mutation.error
-  const blockedCounts = /** @type {any} */ (error)?.details
-  const isForm = ['root', 'child', 'edit'].includes(mode)
-  return <div className="modal-backdrop category-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && !mutation.isPending && onClose()}>
-    <form className="category-dialog" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="category-dialog-title">
-      <header className="category-dialog-head">
-        <div><small>အမျိုးအစားစီမံခန့်ခွဲမှု</small><h3 id="category-dialog-title">{dialogTitles[mode]}</h3></div>
-        <button type="button" onClick={onClose} disabled={mutation.isPending} aria-label="ပိတ်ရန်"><CloseRounded /></button>
-      </header>
-      <div className="category-dialog-body">
-        {isForm && <>
-          {mode === 'child' && <p className="category-parent-note"><FolderRounded /> <span><small>ထည့်သွင်းမည့်နေရာ</small><b>{category.name}</b></span></p>}
-          <label>အမျိုးအစားအမည် <em>*</em><input value={name} onChange={event => setName(event.target.value)} maxLength={120} required autoFocus /></label>
-          <label>ဖော်ပြချက်<textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={1000} rows={4} placeholder="အမျိုးအစားနှင့် သက်ဆိုင်သော အကျဉ်းချုပ်ရေးပါ" /></label>
-        </>}
-        {mode === 'move' && <>
-          <p className="category-parent-note"><DriveFileMoveOutlined /><span><small>ရွှေ့မည့်အမျိုးအစား</small><b>{category.name}</b></span></p>
-          <label>နေရာအသစ်<select value={destination} onChange={event => setDestination(event.target.value)} autoFocus><option value="">ပင်မအမျိုးအစားအဖြစ် ရွှေ့ရန်</option>{destinations.map(item => <option key={item.id} value={item.id}>{item.path}</option>)}</select></label>
-        </>}
-        {(mode === 'archive' || mode === 'restore') && <div className={`category-confirm ${mode}`}>
-          {mode === 'archive' ? <ArchiveOutlined /> : <RestoreRounded />}
-          <div><b>{category.name}</b><p>{mode === 'archive' ? 'ဤအမျိုးအစားကို Archive ပြုလုပ်မည်မှာ သေချာပါသလား။ အောက်ခံအမျိုးအစား၊ ဒေတာ သို့မဟုတ် စာရွက်စာတမ်းရှိပါက မလုပ်ဆောင်နိုင်ပါ။' : 'ဤအမျိုးအစားကို ပြန်လည်အသုံးပြုနိုင်အောင် ပြုလုပ်မည်မှာ သေချာပါသလား။'}</p></div>
-        </div>}
-        {error && <div className="category-error" role="alert">
-          <b>{error.message}</b>
-          {blockedCounts && <span>အောက်ခံအမျိုးအစား {blockedCounts.children || 0} ခု၊ ဒေတာ {blockedCounts.dataRecords || 0} ခု၊ စာရွက်စာတမ်း {blockedCounts.documents || 0} ခု ရှိနေပါသည်။</span>}
-        </div>}
-      </div>
-      <footer className="category-dialog-actions">
-        <button type="button" onClick={onClose} disabled={mutation.isPending}>မလုပ်တော့ပါ</button>
-        <button className={mode === 'archive' ? 'danger' : 'primary'} disabled={mutation.isPending || (isForm && !name.trim())}>{mutation.isPending ? 'လုပ်ဆောင်နေသည်…' : mode === 'archive' ? 'Archive ပြုလုပ်ရန်' : 'အတည်ပြုရန်'}</button>
-      </footer>
-    </form>
-  </div>
-}
-
-function ChildActions({ child, onAction }) {
-  return <details className="category-row-menu">
-    <summary aria-label={`${child.name} လုပ်ဆောင်ချက်များ`}><MoreVertRounded /></summary>
-    <div>
-      <button type="button" onClick={() => onAction('edit', child)}><EditOutlined /> ပြင်ဆင်ရန်</button>
-      <button type="button" onClick={() => onAction('move', child)}><DriveFileMoveOutlined /> ရွှေ့ရန်</button>
-      {child.archivedAt
-        ? <button type="button" onClick={() => onAction('restore', child)}><RestoreRounded /> ပြန်ဖွင့်ရန်</button>
-        : <button type="button" className="danger" onClick={() => onAction('archive', child)}><ArchiveOutlined /> Archive</button>}
-    </div>
-  </details>
-}
-
-export default function Categories({ onViewData, onViewDocuments }) {
-  const [search, setSearch] = useState('')
-  const deferredSearch = useDeferredValue(search.trim())
-  const [includeArchived, setIncludeArchived] = useState(false)
-  const [selectedId, setSelectedId] = useState(null)
-  const [expanded, setExpanded] = useState(new Set())
-  const [dialog, setDialog] = useState(null)
-  const treeQuery = useCategoryTree({ search: deferredSearch, includeArchived })
-  const fullTreeQuery = useCategoryTree({ enabled: dialog?.mode === 'move' })
-  const tree = useMemo(() => treeQuery.data || [], [treeQuery.data])
-  const flatTree = useMemo(() => flattenCategories(tree), [tree])
-  const effectiveSelectedId = flatTree.some(item => item.id === selectedId) ? selectedId : flatTree[0]?.id || null
-  const displayedExpanded = useMemo(() => {
-    if (deferredSearch) return new Set(flatTree.map(item => item.id))
-    return expanded.size ? expanded : new Set(tree.map(item => item.id))
-  }, [deferredSearch, expanded, flatTree, tree])
-  const detailsQuery = useCategoryDetails(effectiveSelectedId)
-  const details = detailsQuery.data
-  const selected = details?.category
-  const user = JSON.parse(sessionStorage.getItem('office_user') || '{}')
-  const canManage = user.role === 'ADMIN'
-
-  const toggleExpanded = id => setExpanded(() => {
-    const next = new Set(displayedExpanded)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    return next
-  })
-  const openDialog = (mode, category = selected) => setDialog({ mode, category })
-  const parent = details?.breadcrumb?.at(-2)
-  const pageError = treeQuery.error || detailsQuery.error
-
-  return <section className="categories-page">
-    <header className="categories-heading">
-      <div className="categories-title"><span><FolderRounded /></span><div><h1>အမျိုးအစားများ</h1><p>ဒေတာနှင့် စာရွက်စာတမ်းများကို ဖိုင်တွဲပုံစံဖြင့် စနစ်တကျ စီမံခန့်ခွဲပါ။</p></div></div>
-      {canManage && <button className="category-primary-action" type="button" onClick={() => openDialog('root', null)}><AddRounded /> အမျိုးအစားအသစ်</button>}
-    </header>
-
-    <div className="categories-grid">
-      <aside className="categories-tree-panel" aria-label="အမျိုးအစားအစီအစဉ်">
-        <div className="category-search"><SearchRounded /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="အမျိုးအစား ရှာရန်…" aria-label="အမျိုးအစားရှာရန်" /></div>
-        <label className="archived-toggle"><input type="checkbox" checked={includeArchived} onChange={event => setIncludeArchived(event.target.checked)} /><span>Archive ပြုလုပ်ထားသည်များ ပြရန်</span></label>
-        <div className="category-tree-scroll">
-          {treeQuery.isLoading
-            ? <div className="category-tree-skeleton" aria-label="အမျိုးအစားများ ဖွင့်နေသည်"><i /><i /><i /><i /></div>
-            : tree.length
-              ? <CategoryTree nodes={tree} selectedId={effectiveSelectedId} expanded={displayedExpanded} onToggle={toggleExpanded} onSelect={setSelectedId} />
-              : <div className="category-state"><FolderRounded /><b>{deferredSearch ? 'ကိုက်ညီသော အမျိုးအစားမရှိပါ' : 'အမျိုးအစား မရှိသေးပါ'}</b><span>{deferredSearch ? 'အခြားစကားလုံးဖြင့် ပြန်လည်ရှာဖွေပါ။' : 'အမျိုးအစားအသစ်တစ်ခု စတင်ထည့်သွင်းနိုင်ပါသည်။'}</span></div>}
-        </div>
-      </aside>
-
-      <main className="category-workspace">
-        {pageError
-          ? <div className="category-error-state" role="alert"><b>အမျိုးအစားအချက်အလက် မဖွင့်နိုင်ပါ</b><span>{pageError.message}</span><button type="button" onClick={() => { treeQuery.refetch(); detailsQuery.refetch() }}>ပြန်လည်ကြိုးစားရန်</button></div>
-          : !selected || detailsQuery.isLoading
-            ? <div className="category-detail-skeleton" aria-label="အသေးစိတ် ဖွင့်နေသည်"><i /><i /><i /><i /></div>
-            : <>
-              <nav className="category-breadcrumb" aria-label="အမျိုးအစားလမ်းကြောင်း">
-                <button type="button" onClick={() => details.breadcrumb[0] && setSelectedId(details.breadcrumb[0].id)} aria-label="ပင်မအမျိုးအစား"><HomeRounded /></button>
-                {details.breadcrumb.map(item => <span key={item.id}><ChevronRightRounded /><button type="button" onClick={() => setSelectedId(item.id)} aria-current={item.id === selected.id ? 'page' : undefined}>{item.name}</button></span>)}
-              </nav>
-
-              <section className="category-overview">
-                <div className="category-overview-main">
-                  <div className="category-summary-line">
-                    <span className="category-summary-icon"><FolderRounded /></span>
-                    <div className="category-summary-copy"><div><h2>{selected.name}</h2>{selected.archivedAt && <span className="category-status archived">Archive</span>}</div><p>{selected.description || 'ဖော်ပြချက် မထည့်ရသေးပါ။'}</p></div>
-                  </div>
-                  {canManage && <div className="category-actions">
-                    <button type="button" className="accent" onClick={() => openDialog('edit')}><EditOutlined /> အမည်ပြင်ရန်</button>
-                    <button type="button" onClick={() => openDialog('move')}><DriveFileMoveOutlined /> ရွှေ့ရန်</button>
-                    {selected.archivedAt
-                      ? <button type="button" onClick={() => openDialog('restore')}><RestoreRounded /> ပြန်ဖွင့်ရန်</button>
-                      : <button type="button" onClick={() => openDialog('archive')}><ArchiveOutlined /> Archive</button>}
-                  </div>}
-
-                  <div className="category-metrics">
-                    <article><span className="blue"><FolderRounded /></span><div><small>အောက်ခံအမျိုးအစားများ</small><b>{details.children.length.toLocaleString()}</b></div></article>
-                    <article><span className="green"><StorageRounded /></span><div><small>ဒေတာမှတ်တမ်းများ</small><b>{selected.dataCount.toLocaleString()}</b></div></article>
-                    <article><span className="purple"><DescriptionRounded /></span><div><small>စာရွက်စာတမ်းများ</small><b>{selected.documentCount.toLocaleString()}</b></div></article>
-                  </div>
-                  <div className="category-view-actions">
-                    <button type="button" className="primary" onClick={() => onViewData?.(selected.id)}><StorageRounded /> ဒေတာကြည့်ရန် <ChevronRightRounded /></button>
-                    <button type="button" onClick={() => onViewDocuments?.(selected.id)}><DescriptionRounded /> စာရွက်စာတမ်းများကြည့်ရန် <ChevronRightRounded /></button>
-                  </div>
-                </div>
-                <dl className="category-metadata">
-                  <div><dt>မူလအမျိုးအစား</dt><dd>{parent?.name || 'ပင်မအမျိုးအစား'}</dd></div>
-                  <div><dt>အခြေအနေ</dt><dd><span className={`category-status ${selected.archivedAt ? 'archived' : 'active'}`}>{selected.archivedAt ? 'Archive' : 'အသုံးပြုနေ'}</span></dd></div>
-                  <div><dt>ဖန်တီးခဲ့သည့်ရက်</dt><dd>{formatDate(selected.createdAt)}</dd></div>
-                  <div><dt>နောက်ဆုံးပြင်ဆင်ချိန်</dt><dd>{formatDate(selected.updatedAt)}</dd></div>
-                </dl>
-              </section>
-
-              <section className="category-children">
-                <header className="category-section-head">
-                  <div><h3><FolderRounded /> အောက်ခံအမျိုးအစားများ <span>({details.children.length})</span></h3><p>{selected.name} အောက်ရှိ တိုက်ရိုက်အမျိုးအစားများ</p></div>
-                  {canManage && !selected.archivedAt && <button type="button" onClick={() => openDialog('child')}><AddRounded /> အောက်ခံအသစ်</button>}
-                </header>
-                {details.children.length
-                  ? <div className="category-table-wrap"><table className="category-children-table"><thead><tr><th>#</th><th>အမည်</th><th>ဖော်ပြချက်</th><th>ဒေတာ</th><th>စာရွက်စာတမ်း</th><th>အခြေအနေ</th><th><span className="visually-hidden">လုပ်ဆောင်ချက်</span></th></tr></thead><tbody>{details.children.map((child, index) => <tr key={child.id}><td>{index + 1}</td><td><button type="button" className="category-name-cell" onClick={() => setSelectedId(child.id)}><FolderRounded /> <b>{child.name}</b></button></td><td title={child.description || ''}>{child.description || '—'}</td><td>{child.dataCount.toLocaleString()}</td><td>{child.documentCount.toLocaleString()}</td><td><span className={`category-status ${child.archivedAt ? 'archived' : 'active'}`}>{child.archivedAt ? 'Archive' : 'အသုံးပြုနေ'}</span></td><td>{canManage ? <ChildActions child={child} onAction={openDialog} /> : <button className="row-open" type="button" onClick={() => setSelectedId(child.id)} aria-label={`${child.name} ဖွင့်ရန်`}><ChevronRightRounded /></button>}</td></tr>)}</tbody></table><p className="category-table-count">စုစုပေါင်း {details.children.length} ခု ပြထားသည်။</p></div>
-                  : <div className="category-no-children"><FolderRounded /><b>အောက်ခံအမျိုးအစား မရှိသေးပါ</b><span>{canManage && !selected.archivedAt ? 'အောက်ခံအမျိုးအစားအသစ်တစ်ခု ထည့်သွင်းနိုင်ပါသည်။' : 'ဤအမျိုးအစားအောက်တွင် ဖိုင်တွဲမရှိသေးပါ။'}</span></div>}
-              </section>
-            </>}
-      </main>
-    </div>
-
-    {dialog && <CategoryDialog mode={dialog.mode} category={dialog.category} tree={dialog.mode === 'move' ? (fullTreeQuery.data || tree) : tree} onClose={() => setDialog(null)} />}
-  </section>
+  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 }

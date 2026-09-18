@@ -2,27 +2,42 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api.js'
 
 export const categoryKeys = {
-  all: ['categories'],
-  tree: (search, includeArchived) => ['categories', 'tree', { search, includeArchived }],
-  detail: id => ['categories', 'detail', id],
+  all: ['file-manager'],
+  tree: search => ['file-manager', 'tree', search],
+  contents: id => ['file-manager', 'contents', id || 'home'],
 }
 
-export function useCategoryTree({ search = '', includeArchived = false, enabled = true } = {}) {
+export function useCategoryTree({ search = '' } = {}) {
   return useQuery({
-    queryKey: categoryKeys.tree(search, includeArchived),
-    queryFn: () => api(`/categories?search=${encodeURIComponent(search)}&includeArchived=${includeArchived}`),
-    enabled,
+    queryKey: categoryKeys.tree(search),
+    queryFn: () => api(`/categories?search=${encodeURIComponent(search)}&includeArchived=false`),
     staleTime: 15_000,
     placeholderData: previous => previous,
   })
 }
 
-export function useCategoryDetails(id) {
+export async function folderContentsRequest(folderId) {
+  if (!folderId) return null
+  const [details, dataItems, documents] = await Promise.all([
+    api(`/categories/${folderId}`),
+    api(`/data/collections?categoryId=${encodeURIComponent(folderId)}`),
+    api(`/documents?categoryId=${encodeURIComponent(folderId)}&includeDescendants=false&limit=100`),
+  ])
+  return {
+    folder: details.category,
+    breadcrumb: details.breadcrumb,
+    folders: details.children || [],
+    dataItems: dataItems || [],
+    documents: documents || [],
+  }
+}
+
+export function useFolderContents(folderId) {
   return useQuery({
-    queryKey: categoryKeys.detail(id),
-    queryFn: () => api(`/categories/${id}`),
-    enabled: Boolean(id),
-    staleTime: 10_000,
+    queryKey: categoryKeys.contents(folderId),
+    queryFn: () => folderContentsRequest(folderId),
+    enabled: Boolean(folderId),
+    staleTime: 8_000,
   })
 }
 
@@ -31,18 +46,13 @@ export function categoryMutationRequest({ mode, category, values }) {
   if (mode === 'root' || mode === 'child') return api(base, { method: 'POST', body: JSON.stringify(values) })
   if (mode === 'edit') return api(`${base}/${category.id}`, { method: 'PATCH', body: JSON.stringify(values) })
   if (mode === 'move') return api(`${base}/${category.id}/move`, { method: 'POST', body: JSON.stringify(values) })
-  if (mode === 'archive') return api(`${base}/${category.id}/archive`, { method: 'POST' })
-  if (mode === 'restore') return api(`${base}/${category.id}/restore`, { method: 'POST' })
-  throw new Error('မသိရှိသော လုပ်ဆောင်ချက်ဖြစ်ပါသည်။')
+  throw new Error('မသိရှိသော ဖိုင်တွဲလုပ်ဆောင်ချက်ဖြစ်ပါသည်။')
 }
 
 export function useCategoryMutation() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: categoryMutationRequest,
-    onSuccess: async (_result, variables) => {
-      await queryClient.invalidateQueries({ queryKey: categoryKeys.all })
-      if (variables.category?.id) await queryClient.invalidateQueries({ queryKey: categoryKeys.detail(variables.category.id) })
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: categoryKeys.all }),
   })
 }

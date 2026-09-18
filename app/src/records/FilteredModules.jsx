@@ -2,17 +2,17 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api.js'
 import './filtered-modules.css'
 
-function useCategoryResource(resource, categoryId, revision) {
+function useCategoryResource(resource, categoryId, revision, dataCollectionId = null) {
   const [state, setState] = useState({ loading: true, error: '', items: [], category: null })
   useEffect(() => {
     let active = true
     Promise.all([
-      api(`/${resource}${categoryId ? `?categoryId=${encodeURIComponent(categoryId)}&includeDescendants=true` : ''}`),
+      api(`/${resource}${categoryId || dataCollectionId ? `?${new URLSearchParams({ ...(categoryId ? { categoryId, includeDescendants: dataCollectionId ? 'false' : 'true' } : {}), ...(dataCollectionId ? { dataCollectionId } : {}) })}` : ''}`),
       categoryId ? api(`/categories/${categoryId}`) : Promise.resolve(null),
     ]).then(([items, details]) => active && setState({ loading: false, error: '', items, category: details?.category || null }))
       .catch(error => active && setState(current => ({ ...current, loading: false, error: error.message })))
     return () => { active = false }
-  }, [categoryId, resource, revision])
+  }, [categoryId, dataCollectionId, resource, revision])
   return state
 }
 
@@ -23,9 +23,9 @@ function State({ loading, error, empty, retry }) {
   return null
 }
 
-export function DataRecordsPage({ categoryId }) {
+export function DataRecordsPage({ categoryId, dataCollectionId = null }) {
   const [revision, setRevision] = useState(0)
-  const state = useCategoryResource('data', categoryId, revision)
+  const state = useCategoryResource('data', categoryId, revision, dataCollectionId)
   const [search, setSearch] = useState('')
   const rows = useMemo(() => state.items.filter(item => `${item.title} ${JSON.stringify(item.payload)}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())), [search, state.items])
   return <section className="filtered-page">

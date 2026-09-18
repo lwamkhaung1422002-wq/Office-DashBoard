@@ -7,6 +7,7 @@ import { makeStorageKey } from '../../lib/storage.js'
 const metadataSelect = {
   id: true, title: true, description: true, fileName: true, mimeType: true,
   fileSize: true, accessLevel: true, categoryId: true, createdById: true,
+  createdBy: { select: { name: true } },
   archivedAt: true, createdAt: true, updatedAt: true,
 }
 

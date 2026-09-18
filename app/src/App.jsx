@@ -20,7 +20,7 @@ const records = [
   ['၀၂ စက်တင်ဘာ ၂၀၂၆','ဘဏ္ဍာရေးဌာန','FIN-2609-038','လစဉ်အသုံးစရိတ်အစီရင်ခံစာ','အစီရင်ခံစာ','ပြီးစီးပြီး','August_Office_Return.xlsx'],
 ]
 const imports=[['September_Report.xlsx','၀၉ စက်တင်ဘာ ၂၀၂၆','၂၅၀','အတည်ပြုပြီး'],['August_Office_Return.xlsx','၃၁ ဩဂုတ် ၂၀၂၆','၁၉၈','အတည်ပြုပြီး'],['Q3_Activity_Register.xlsx','၀၁ ဇူလိုင် ၂၀၂၆','၃၁၂','အတည်ပြုပြီး']]
-const nav=[['overview','ပင်မစာမျက်နှာ','⌂'],['categories','အမျိုးအစားများ','✣'],['entry','ဒေတာများ','▦'],['reports','စာရွက်စာတမ်းများ','▣'],['prep','အသုံးပြုသူများ','♟'],['preview','အစီရင်ခံစာများ','▥'],['activity','လုပ်ဆောင်ချက်မှတ်တမ်း','◷']]
+const nav=[['overview','ပင်မစာမျက်နှာ','⌂'],['categories','File Manager','✣'],['entry','ဒေတာများ','▦'],['reports','စာရွက်စာတမ်းများ','▣'],['prep','အသုံးပြုသူများ','♟'],['preview','အစီရင်ခံစာများ','▥'],['activity','လုပ်ဆောင်ချက်မှတ်တမ်း','◷']]
 function Badge({children}){return <span className={'badge '+children.replaceAll(' ','-')}>{children}</span>}
 function App(){
   const [logged,setLogged]=useState(()=>Boolean(getToken()))
@@ -29,6 +29,7 @@ function App(){
   const [published,setPublished]=useState(true)
   const [presentation,setPresentation]=useState(false)
   const [categoryFilter,setCategoryFilter]=useState(null)
+  const [collectionFilter,setCollectionFilter]=useState(null)
   const filtered=useMemo(()=>records.filter(r=>r.join(' ').toLowerCase().includes(search.toLowerCase())),[search])
   const enter=()=>{setPresentation(true);document.documentElement.requestFullscreen?.().catch(()=>{})}
   const leave=()=>{document.exitFullscreen?.().catch(()=>{});setPresentation(false)}
@@ -50,8 +51,8 @@ function App(){
       <header className="workspace-header"><div className="header-page-title"><span>{nav.find(n=>n[0]===page)?.[1]}</span></div><div className="profile"><button className="notification-button" aria-label="အသိပေးချက် ၅ ခု"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span>5</span></button><span className="avatar">AK</span><div><b>Admin K.</b><small>Administrator</small></div></div></header>
       {!['entry','categories'].includes(page)&&<div className="page-context"><small>Workspace / {nav.find(n=>n[0]===page)?.[1]}</small><h2>{nav.find(n=>n[0]===page)?.[1]}</h2></div>}
       {page==='overview'&&<Overview go={setPage}/>}
-      {page==='categories'&&<Categories onViewData={id=>{setCategoryFilter(id);setPage('entry')}} onViewDocuments={id=>{setCategoryFilter(id);setPage('reports')}}/>}
-      {page==='entry'&&<DataRecordsPage categoryId={categoryFilter}/>} {page==='reports'&&<DocumentsPage categoryId={categoryFilter}/>} {page==='activity'&&<Activity/>}
+      {page==='categories'&&<Categories onViewData={(categoryId,collectionId)=>{setCategoryFilter(categoryId);setCollectionFilter(collectionId);setPage('entry')}}/>}
+      {page==='entry'&&<DataRecordsPage categoryId={categoryFilter} dataCollectionId={collectionFilter}/>} {page==='reports'&&<DocumentsPage categoryId={categoryFilter}/>} {page==='activity'&&<Activity/>}
       {page==='prep'&&<Prep go={setPage}/>} {page==='preview'&&<Preview published={published} setPublished={setPublished} open={enter}/>}
     </main>
   </div>

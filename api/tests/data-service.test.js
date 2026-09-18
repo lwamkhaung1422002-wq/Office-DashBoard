@@ -4,7 +4,7 @@ import { createDataService } from '../server/modules/data/data.service.js'
 function memoryDatabase() {
   const fields = [{ id: 'field-1', key: 'department', label: 'Department', type: 'TEXT', required: true, position: 0 }, { id: 'field-2', key: 'budget', label: 'Budget', type: 'NUMBER', required: true, position: 1 }]
   const collection = { id: 'collection-1', categoryId: 'category-1', name: 'Budget', defaultAccessLevel: 'NORMAL', archivedAt: null, fields }
-  const state = { records: [], audits: [] }
+  const state = { records: [], imports: [], audits: [] }
   let sequence = 0
   const db = {
     state,
@@ -13,6 +13,7 @@ function memoryDatabase() {
       findFirst: async ({ where }) => where.id === collection.id ? collection : null,
       findMany: async () => [collection],
       findUnique: async () => collection,
+      update: async ({ data }) => Object.assign(collection, data, { updatedAt: new Date() }),
     },
     dataRecord: {
       findFirst: async ({ where }) => {
@@ -24,7 +25,9 @@ function memoryDatabase() {
         .slice(cursor ? state.records.findIndex(record => record.id === cursor.id) + skip : 0, take),
       create: async ({ data }) => { const row = { id: `record-${++sequence}`, archivedAt: null, createdAt: new Date(), updatedAt: new Date(), ...data }; state.records.push(row); return row },
       update: async ({ where, data }) => Object.assign(state.records.find(record => record.id === where.id), data, { updatedAt: new Date() }),
+      updateMany: async ({ where, data }) => { state.records.filter(record => record.dataCollectionId === where.dataCollectionId).forEach(record => Object.assign(record, data)); return { count: state.records.length } },
     },
+    importJob: { updateMany: async ({ where, data }) => { state.imports.filter(job => job.dataCollectionId === where.dataCollectionId).forEach(job => Object.assign(job, data)); return { count: state.imports.length } } },
     auditLog: { create: async ({ data }) => { state.audits.push(data); return data } },
     $transaction: callback => callback(db),
   }
@@ -64,5 +67,13 @@ describe('unified data service', () => {
     const vip = await service.list({ dataCollectionId: 'collection-1', includeDescendants: true, sortBy: 'createdAt', sortDirection: 'desc', limit: 50 }, 'VIP_VIEWER')
     expect(normal.data.map(row => row.id)).toEqual(['normal-1'])
     expect(vip.data.map(row => row.id)).toEqual(['normal-1', 'vip-1'])
+  })
+
+  it('moves a structured data collection and its related records/imports together', async () => {
+    db.state.records.push({ id: 'row-1', categoryId: 'category-1', dataCollectionId: 'collection-1' })
+    db.state.imports.push({ id: 'import-1', categoryId: 'category-1', dataCollectionId: 'collection-1' })
+    await service.updateCollection('collection-1', { categoryId: 'category-2', name: 'Budget 2026' }, 'admin-1')
+    expect(db.state.records[0].categoryId).toBe('category-2')
+    expect(db.state.imports[0].categoryId).toBe('category-2')
   })
 })

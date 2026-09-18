@@ -12,6 +12,7 @@ const clean = category => ({
   archivedAt: category.archivedAt,
   createdAt: category.createdAt,
   updatedAt: category.updatedAt,
+  createdBy: category.createdBy ? { name: category.createdBy.name } : null,
 })
 
 async function siblingExists(db, { name, parentId, excludeId = undefined }) {
@@ -66,7 +67,7 @@ async function loadHierarchy(db, includeArchived = false, role) {
   const where = includeArchived ? {} : activeWhere
   const contentWhere = { ...activeWhere, ...(role ? { accessLevel: { in: allowedAccessLevels(role) } } : {}) }
   const [categories, dataGroups, documentGroups] = await Promise.all([
-    db.category.findMany({ where }),
+    db.category.findMany({ where, include: { createdBy: { select: { name: true } } } }),
     db.dataRecord.groupBy({ by: ['categoryId'], where: contentWhere, _count: { _all: true } }),
     db.document.groupBy({ by: ['categoryId'], where: contentWhere, _count: { _all: true } }),
   ])

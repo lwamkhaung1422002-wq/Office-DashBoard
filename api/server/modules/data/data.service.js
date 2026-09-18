@@ -4,7 +4,11 @@ import { categoryIds } from '../../lib/categories.js'
 import { DomainError, notFound } from '../../lib/errors.js'
 import { validateRecordPayload } from './data.validation.js'
 
-const collectionInclude = { fields: { orderBy: { position: 'asc' } } }
+const collectionInclude = {
+  fields: { orderBy: { position: 'asc' } },
+  createdBy: { select: { name: true } },
+  _count: { select: { records: { where: { archivedAt: null } } } },
+}
 
 function encodeCursor(record) {
   return Buffer.from(JSON.stringify({ id: record.id })).toString('base64url')
@@ -46,6 +50,30 @@ export function createDataService(prisma) {
         const created = await tx.dataCollection.create({ data: { categoryId: input.categoryId, name: input.name, description: input.description, defaultAccessLevel: input.defaultAccessLevel, createdById: actorId } })
         await tx.dataField.createMany({ data: input.fields.map((field, position) => ({ ...field, position, dataCollectionId: created.id })) })
         return tx.dataCollection.findUnique({ where: { id: created.id }, include: collectionInclude })
+      })
+    },
+    async updateCollection(id, input, _actorId) {
+      const before = await collection(id)
+      const previousCategoryId = before.categoryId
+      const categoryId = input.categoryId || before.categoryId
+      if (input.categoryId) {
+        const category = await prisma.category.findFirst({ where: { id: input.categoryId, archivedAt: null }, select: { id: true } })
+        if (!category) throw new DomainError(422, 'INVALID_CATEGORY', 'The selected category is unavailable')
+      }
+      const duplicate = await prisma.dataCollection.findFirst({
+        where: { id: { not: id }, categoryId, name: input.name || before.name },
+        select: { id: true },
+      })
+      if (duplicate) throw new DomainError(409, 'DUPLICATE_DATA_COLLECTION', 'A structured data item with this name already exists in the selected folder')
+      return prisma.$transaction(async tx => {
+        const updated = await tx.dataCollection.update({ where: { id }, data: input, include: collectionInclude })
+        if (input.categoryId && input.categoryId !== previousCategoryId) {
+          await Promise.all([
+            tx.dataRecord.updateMany({ where: { dataCollectionId: id }, data: { categoryId: input.categoryId } }),
+            tx.importJob.updateMany({ where: { dataCollectionId: id }, data: { categoryId: input.categoryId } }),
+          ])
+        }
+        return updated
       })
     },
     listCollections(categoryId, role) {
