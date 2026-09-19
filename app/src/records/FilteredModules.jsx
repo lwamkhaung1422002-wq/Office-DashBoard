@@ -21,7 +21,7 @@ import StorageRounded from '@mui/icons-material/StorageRounded'
 import VisibilityOutlined from '@mui/icons-material/VisibilityOutlined'
 import { api, apiBlob, apiEnvelope } from '../api.js'
 import { useCategoryTree } from '../categories/category-queries.js'
-import { createRecordRequest, fieldInputType, filterFolderTree, recordQueryParams } from './data-workspace-utils.js'
+import { clearCollectionContext, createRecordRequest, dataCollectionDetailsRequest, fieldInputType, filterFolderTree, generateRecordTitle, handleCollectionEnter, recordQueryParams } from './data-workspace-utils.js'
 import './filtered-modules.css'
 import './data-workspace.css'
 
@@ -62,7 +62,6 @@ export function RecordDialog({ tree, initialCategory, initialCollection, record,
   const [folderSearch, setFolderSearch] = useState('')
   const [expanded, setExpanded] = useState(new Set(tree.map(item => item.id)))
   const [newFolder, setNewFolder] = useState('')
-  const [title, setTitle] = useState(record?.title || '')
   const [view, setView] = useState(record?.accessLevel || collection?.defaultAccessLevel || 'NORMAL')
   const [payload, setPayload] = useState(record?.payload || {})
   const [busy, setBusy] = useState(false)
@@ -86,10 +85,11 @@ export function RecordDialog({ tree, initialCategory, initialCollection, record,
   }
 
   async function save() {
-    if (!collection || !title.trim()) return
+    if (!collection) return
     setBusy(true); setError('')
     try {
-      const body = { title: title.trim(), accessLevel: view, payload }
+      const title = generateRecordTitle({ fields: collection.fields, payload, existingTitle: record?.title || '', collectionName: collection.name })
+      const body = { title, accessLevel: view, payload }
       if (editing) await api(`/admin/data/${record.id}`, { method: 'PATCH', body: JSON.stringify(body) })
       else await createRecordRequest({ ...body, categoryId: folder.id, dataCollectionId: collection.id })
       onSaved()
@@ -97,10 +97,10 @@ export function RecordDialog({ tree, initialCategory, initialCollection, record,
   }
 
   const fields = collection?.fields || []
-  return <Modal wide title={editing ? 'မှတ်တမ်းပြင်ဆင်ရန်' : 'Add New'} eyebrow="Structured Data" onClose={onClose} actions={<><button onClick={onClose}>Cancel</button><button className="primary" onClick={save} disabled={busy || !collection || !title.trim()}>{busy ? 'Saving…' : editing ? 'Save changes' : 'Add New'}</button></>}>
+  return <Modal wide title={editing ? 'မှတ်တမ်းပြင်ဆင်ရန်' : 'Add New'} eyebrow="Structured Data" onClose={onClose} actions={<><button onClick={onClose}>Cancel</button><button className="primary" onClick={save} disabled={busy || !collection}>{busy ? 'Saving…' : editing ? 'Save changes' : 'Add New'}</button></>}>
     {!editing && <section className="data-location-card"><div><small>Location</small><b>{folder ? `Home / ${folder.name}` : 'Folder ရွေးချယ်ရန်'}</b></div><button onClick={() => setStep('location')}>Change</button><div><small>Data File</small><b>{collection?.name || 'Structured Data ရွေးချယ်ရန်'}</b></div></section>}
     {!editing && step === 'location' && <div className="data-location-picker"><div className="data-picker-tree"><label><SearchRounded /><input value={folderSearch} onChange={event => setFolderSearch(event.target.value)} placeholder="Folder ရှာရန်…" /></label><div><FolderTree nodes={filteredTree} selectedId={folder?.id} expanded={expanded} onToggle={id => setExpanded(current => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelect={node => { setFolder(node); setCollection(null) }} /></div><div className="data-new-folder"><input value={newFolder} onChange={event => setNewFolder(event.target.value)} placeholder="Folder အသစ်အမည်" /><button onClick={createFolder} disabled={busy || !newFolder.trim()}><CreateNewFolderOutlined />New Folder</button></div></div><div className="data-picker-files"><h3>Data File</h3>{folder ? collections.map(item => <button key={item.id} className={collection?.id === item.id ? 'selected' : ''} onClick={() => { setCollection(item); setView(item.defaultAccessLevel); setPayload({}); setStep('form') }}><StorageRounded /><span><b>{item.name}</b><small>{item._count?.records || 0} records · {item.fields?.length || 0} fields</small></span></button>) : <p>Folder တစ်ခုရွေးပါ</p>}{folder && !collections.length && <p>ဤ Folder တွင် Structured Data မရှိသေးပါ</p>}</div></div>}
-    {(editing || step === 'form') && collection && <div className="data-record-form"><label>ခေါင်းစဉ် <em>*</em><input value={title} onChange={event => setTitle(event.target.value)} autoFocus /></label><label>View<select value={view} onChange={event => setView(event.target.value)}><option value="NORMAL">Normal</option><option value="VIP">VIP</option></select></label><div className="data-dynamic-fields">{fields.map(field => <DynamicField key={field.id} field={field} value={payload[field.key]} onChange={value => setPayload(current => ({ ...current, [field.key]: value }))} />)}</div></div>}
+    {(editing || step === 'form') && collection && <div className="data-record-form"><label>View<select value={view} onChange={event => setView(event.target.value)}><option value="NORMAL">Normal</option><option value="VIP">VIP</option></select></label><div className="data-dynamic-fields">{fields.map(field => <DynamicField key={field.id} field={field} value={payload[field.key]} onChange={value => setPayload(current => ({ ...current, [field.key]: value }))} />)}</div></div>}
     {error && <p className="data-error">{error}</p>}
   </Modal>
 }
@@ -128,7 +128,16 @@ function RecordMenu({ position, onClose, onView, onEdit, onDelete }) {
   return <div className="data-row-menu" style={position} onClick={event => event.stopPropagation()}><button onClick={onView}><VisibilityOutlined />View</button><button onClick={onEdit}><EditOutlined />Edit</button><button onClick={onView}><InfoOutlined />Details</button><hr/><button className="danger" onClick={onDelete}><DeleteOutlineRounded />Delete</button></div>
 }
 
-export function DataRecordsPage({ categoryId, dataCollectionId = null }) {
+export function CollectionMenu({ position, onClose, onOpen, onAdd, onDashboard, onExport, onDetails }) {
+  useEffect(() => { const close = () => onClose(); window.addEventListener('click', close); return () => window.removeEventListener('click', close) }, [onClose])
+  return <div className="data-row-menu" style={position} onClick={event => event.stopPropagation()}><button onClick={onOpen}><VisibilityOutlined />Open</button><button onClick={onAdd}><AddRounded />Add New</button><button onClick={onDashboard}><DashboardCustomizeOutlined />Dashboard</button><button onClick={onExport}><DownloadRounded />Export</button><button onClick={onDetails}><InfoOutlined />Details</button></div>
+}
+
+export function DataCollectionRow({ item, selected, onSelect, onOpen, onMenu }) {
+  return <div className={`data-collection-row ${selected ? 'selected' : ''}`} tabIndex={0} role="row" aria-selected={selected} onClick={() => onSelect(item)} onDoubleClick={() => onOpen(item)} onKeyDown={event => handleCollectionEnter(event, item, selected ? item.id : null, onOpen)}><span><i><StorageRounded /></i><b>{item.name}</b></span><span>Structured Data</span><span>{(item._count?.records || 0).toLocaleString()}</span><span>{formatDate(item.updatedAt)}</span><button onClick={event => { event.stopPropagation(); onMenu(event, item) }} aria-label={`${item.name} actions`}><MoreVertRounded /></button></div>
+}
+
+export function DataRecordsPage({ categoryId, dataCollectionId = null, onOpenCollection, onClearCollection }) {
   const treeQuery = useCategoryTree()
   const tree = useMemo(() => treeQuery.data || [], [treeQuery.data])
   const [selectedFolder, setSelectedFolder] = useState(null)
@@ -204,28 +213,47 @@ export function DataRecordsPage({ categoryId, dataCollectionId = null }) {
   }, [records.nextCursor, records.loading, loadRecords])
 
   const filteredTree = useMemo(() => filterFolderTree(tree, folderSearch), [folderSearch, tree])
-  const changeFolder = node => { setSelectedFolder(node); setCollection(null); setSelectedCollectionId(null); setSearch(''); setFilters({}) }
-  const openCollection = item => { setCollection(item); setSearch(''); setFilters({}) }
+  const leaveCollection = () => {
+    clearCollectionContext({ setCollection, setSelectedCollectionId, onClearCollection })
+    setSearch('')
+    setFilters({})
+  }
+  const changeFolder = node => { leaveCollection(); setSelectedFolder(node) }
+  const withCollection = async (item, action) => {
+    setMenu(null)
+    try {
+      const details = await dataCollectionDetailsRequest(item.id)
+      action(details)
+    } catch (error) { setNotice(error.message) }
+  }
+  const openCollection = (item, afterOpen) => withCollection(item, details => {
+    setCollection(details)
+    setSelectedCollectionId(details.id)
+    setSearch('')
+    setFilters({})
+    onOpenCollection?.(details.id)
+    afterOpen?.(details)
+  })
   const closeDialog = () => setDialog(null)
   const refreshRecords = () => { closeDialog(); setMenu(null); setRecordRevision(value => value + 1); setNotice('Saved successfully') }
   const archiveRecord = async record => { if (!window.confirm('This record will be deleted. Continue?')) return; try { await api(`/admin/data/${record.id}/archive`, { method: 'POST' }); refreshRecords() } catch (error) { setNotice(error.message) } }
-  const exportRecords = async () => { if (!collection) return; const params = new URLSearchParams({ dataCollectionId: collection.id, categoryId: selectedFolder.id, format: 'xlsx', ...(Object.keys(filters).length ? { filters: JSON.stringify(filters) } : {}) }); try { const blob = await apiBlob(`/reports/export?${params}`); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${collection.name}.xlsx`; link.click(); URL.revokeObjectURL(url) } catch (error) { setNotice(error.message) } }
+  const exportRecords = async (targetCollection = collection) => { if (!targetCollection) return; const params = new URLSearchParams({ dataCollectionId: targetCollection.id, categoryId: targetCollection.categoryId || selectedFolder.id, format: 'xlsx', ...(Object.keys(filters).length ? { filters: JSON.stringify(filters) } : {}) }); try { const blob = await apiBlob(`/reports/export?${params}`); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${targetCollection.name}.xlsx`; link.click(); URL.revokeObjectURL(url) } catch (error) { setNotice(error.message) } }
 
   return <section className="data-workspace">
     <aside className="data-sidebar"><label className="data-folder-search"><SearchRounded /><input value={folderSearch} onChange={event => setFolderSearch(event.target.value)} placeholder="Folder များ ရှာဖွေ…" /></label><div className="data-tree-home"><HomeRounded /><span>Home</span></div><div className="data-tree-scroll">{treeQuery.isLoading ? <p>Folder များဖွင့်နေသည်…</p> : <FolderTree nodes={filteredTree} selectedId={selectedFolder?.id} expanded={expanded} onToggle={id => setExpanded(current => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelect={changeFolder} />}</div></aside>
     <main className="data-main">
-      <header className="data-topbar"><nav><button onClick={() => { setCollection(null); setSelectedFolder(tree[0] || null) }}><HomeRounded /></button>{breadcrumb.map(item => <span key={item.id}><NavigateNextRounded />{item.name}</span>)}{collection && <span><NavigateNextRounded />{collection.name}</span>}</nav><button className="data-add" onClick={() => setDialog({ type: 'record', record: null })} disabled={!admin()}><AddRounded />Add New</button></header>
-      {!collection ? <section className="data-collection-list"><div className="data-list-head"><span>Name</span><span>Type</span><span>Records</span><span>Last Updated</span><span /></div>{collections.loading ? <div className="data-empty">Structured Data ဖွင့်နေသည်…</div> : collections.error ? <div className="data-empty error">{collections.error}</div> : collections.items.map(item => <div className={`data-collection-row ${selectedCollectionId === item.id ? 'selected' : ''}`} key={item.id} tabIndex={0} onClick={() => setSelectedCollectionId(item.id)} onDoubleClick={() => openCollection(item)}><span><i><StorageRounded /></i><b>{item.name}</b></span><span>Structured Data</span><span>{(item._count?.records || 0).toLocaleString()}</span><span>{formatDate(item.updatedAt)}</span><button onClick={event => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); setMenu({ kind: 'collection', item, position: { right: window.innerWidth - rect.right, top: rect.bottom + 4 } }) }}><MoreVertRounded /></button></div>)}{!collections.loading && !collections.error && !collections.items.length && <div className="data-empty"><StorageRounded /><b>Structured Data မရှိသေးပါ</b><span>အခြား Folder ရွေးပါ သို့မဟုတ် Add New မှ မှတ်တမ်းထည့်ပါ။</span></div>}</section> : <section className="data-records-view">
-        <div className="data-records-title"><button onClick={() => setCollection(null)}><ArrowBackRounded /></button><div><small>Structured Data</small><h1>{collection.name}</h1><p>{collection.description || `${collection.fields.length} fields · ${collection._count?.records || 0} records`}</p></div></div>
+      <header className="data-topbar"><nav><button onClick={() => { leaveCollection(); setSelectedFolder(tree[0] || null) }}><HomeRounded /></button>{breadcrumb.map(item => <span key={item.id}><NavigateNextRounded />{item.name}</span>)}{collection && <span><NavigateNextRounded />{collection.name}</span>}</nav><button className="data-add" onClick={() => setDialog({ type: 'record', record: null })} disabled={!admin()}><AddRounded />Add New</button></header>
+      {!collection ? <section className="data-collection-list"><div className="data-list-head"><span>Name</span><span>Type</span><span>Records</span><span>Last Updated</span><span /></div>{collections.loading ? <div className="data-empty">Structured Data ဖွင့်နေသည်…</div> : collections.error ? <div className="data-empty error">{collections.error}</div> : collections.items.map(item => <DataCollectionRow key={item.id} item={item} selected={selectedCollectionId === item.id} onSelect={selected => setSelectedCollectionId(selected.id)} onOpen={openCollection} onMenu={(event, selected) => { const rect = event.currentTarget.getBoundingClientRect(); setMenu({ kind: 'collection', item: selected, position: { right: window.innerWidth - rect.right, top: rect.bottom + 4 } }) }} />)}{!collections.loading && !collections.error && !collections.items.length && <div className="data-empty"><StorageRounded /><b>Structured Data မရှိသေးပါ</b><span>အခြား Folder ရွေးပါ သို့မဟုတ် Add New မှ မှတ်တမ်းထည့်ပါ။</span></div>}</section> : <section className="data-records-view">
+        <div className="data-records-title"><button onClick={leaveCollection} aria-label="Back to Structured Data list"><ArrowBackRounded /></button><div><small>Structured Data</small><h1>{collection.name}</h1><p>{collection.description || `${collection.fields.length} fields · ${collection._count?.records || 0} records`}</p></div></div>
         <div className="data-record-toolbar"><div><button className="primary" onClick={() => setDialog({ type: 'record', record: null })}><AddRounded />Add New</button><button onClick={() => setDialog({ type: 'dashboard' })}><DashboardCustomizeOutlined />Dashboard</button><button onClick={exportRecords}><DownloadRounded />Export</button></div><div><label><SearchRounded /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="မှတ်တမ်းရှာရန်…" /></label><button className={showFilters ? 'active' : ''} onClick={() => setShowFilters(value => !value)}><FilterListRounded />Filters</button><select value={`${sort.sortBy}:${sort.sortDirection}`} onChange={event => { const [sortBy, sortDirection] = event.target.value.split(':'); setSort({ sortBy, sortDirection }) }}><option value="updatedAt:desc">Recently updated</option><option value="createdAt:desc">Newest</option><option value="title:asc">Title A–Z</option></select></div></div>
         {showFilters && <div className="data-filter-panel">{collection.fields.map(field => <DynamicField key={field.id} field={{ ...field, required: false, options: filterOptions[field.key] || field.options }} value={filters[field.key] ?? ''} onChange={value => setFilters(current => { const next = { ...current }; if (value === '' || value === null) delete next[field.key]; else next[field.key] = value; return next })} />)}<button onClick={() => setFilters({})}>Clear filters</button></div>}
         <div className="data-record-table"><table><thead><tr><th>Name</th>{collection.fields.map(field => <th key={field.id}>{field.label}</th>)}<th>Last Updated</th><th>Actions</th></tr></thead><tbody>{records.items.map(record => <tr key={record.id} onDoubleClick={() => setDialog({ type: 'details', record })}><td><b>{record.title}</b></td>{collection.fields.map(field => <td key={field.id}>{field.type === 'BOOLEAN' ? (record.payload[field.key] ? 'Yes' : 'No') : field.type === 'DATE' ? formatDate(record.payload[field.key]) : String(record.payload[field.key] ?? '—')}</td>)}<td>{formatDate(record.updatedAt)}</td><td><button onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); setMenu({ kind: 'record', item: record, position: { right: window.innerWidth - rect.right, top: rect.bottom + 4 } }) }}><MoreVertRounded /></button></td></tr>)}</tbody></table>{records.loading && <div className="data-loading">Loading…</div>}{records.error && <div className="data-error">{records.error}</div>}{!records.loading && !records.items.length && <div className="data-empty"><StorageRounded /><b>မှတ်တမ်းမရှိသေးပါ</b><span>Add New ဖြင့် ပထမဆုံးမှတ်တမ်းထည့်နိုင်ပါသည်။</span></div>}<div ref={sentinel} className="data-sentinel">{records.nextCursor ? 'More records loading…' : records.items.length ? 'All records loaded' : ''}</div></div>
       </section>}
     </main>
     {menu?.kind === 'record' && <RecordMenu position={menu.position} onClose={() => setMenu(null)} onView={() => { setDialog({ type: 'details', record: menu.item }); setMenu(null) }} onEdit={() => { setDialog({ type: 'record', record: menu.item }); setMenu(null) }} onDelete={() => archiveRecord(menu.item)} />}
-    {menu?.kind === 'collection' && <div className="data-row-menu" style={menu.position}><button onClick={() => { openCollection(menu.item); setMenu(null) }}><VisibilityOutlined />Open</button><button onClick={() => { setDialog({ type: 'collection-details', collection: menu.item }); setMenu(null) }}><InfoOutlined />Details</button></div>}
-    {dialog?.type === 'record' && <RecordDialog tree={tree} initialCategory={selectedFolder} initialCollection={collection} record={dialog.record} onClose={closeDialog} onSaved={refreshRecords} refreshTree={treeQuery.refetch} />}
-    {dialog?.type === 'dashboard' && <DashboardDialog collection={collection} onClose={closeDialog} />}
+    {menu?.kind === 'collection' && <CollectionMenu position={menu.position} onClose={() => setMenu(null)} onOpen={() => openCollection(menu.item)} onAdd={() => openCollection(menu.item, details => setDialog({ type: 'record', record: null, collection: details }))} onDashboard={() => withCollection(menu.item, details => setDialog({ type: 'dashboard', collection: details }))} onExport={() => withCollection(menu.item, exportRecords)} onDetails={() => withCollection(menu.item, details => setDialog({ type: 'collection-details', collection: details }))} />}
+    {dialog?.type === 'record' && <RecordDialog tree={tree} initialCategory={selectedFolder} initialCollection={dialog.collection || collection} record={dialog.record} onClose={closeDialog} onSaved={refreshRecords} refreshTree={treeQuery.refetch} />}
+    {dialog?.type === 'dashboard' && <DashboardDialog collection={dialog.collection || collection} onClose={closeDialog} />}
     {dialog?.type === 'details' && <Modal title={dialog.record.title} eyebrow="Record Details" onClose={closeDialog} actions={<button className="primary" onClick={closeDialog}>Done</button>}><dl className="data-details">{collection.fields.map(field => <div key={field.id}><dt>{field.label}</dt><dd>{String(dialog.record.payload[field.key] ?? '—')}</dd></div>)}<div><dt>Created</dt><dd>{formatDate(dialog.record.createdAt)}</dd></div><div><dt>Updated</dt><dd>{formatDate(dialog.record.updatedAt)}</dd></div><div><dt>Source</dt><dd>{dialog.record.sourceType === 'EXCEL' ? 'Excel' : 'Manual'}</dd></div><div><dt>View</dt><dd>{dialog.record.accessLevel === 'VIP' ? 'VIP' : 'Normal'}</dd></div></dl></Modal>}
     {dialog?.type === 'collection-details' && <Modal title={dialog.collection.name} eyebrow="Structured Data" onClose={closeDialog} actions={<button className="primary" onClick={closeDialog}>Done</button>}><dl className="data-details"><div><dt>Location</dt><dd>{breadcrumb.map(item => item.name).join(' / ')}</dd></div><div><dt>Records</dt><dd>{dialog.collection._count?.records || 0}</dd></div><div><dt>Fields</dt><dd>{dialog.collection.fields.map(field => field.label).join(', ')}</dd></div><div><dt>Last Updated</dt><dd>{formatDate(dialog.collection.updatedAt)}</dd></div></dl></Modal>}
     {notice && <div className="data-toast">{notice}</div>}

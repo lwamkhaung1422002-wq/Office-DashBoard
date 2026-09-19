@@ -73,6 +73,11 @@ export function createCutController() {
   }
 }
 
+export function exitTrashThen(setTrashMode, action) {
+  setTrashMode(false)
+  return action()
+}
+
 function formatBytes(bytes = 0) {
   if (!bytes) return '0 KB'
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`

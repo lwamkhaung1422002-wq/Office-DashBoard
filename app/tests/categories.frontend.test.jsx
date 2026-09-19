@@ -1,9 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import Categories, { ContextMenu } from '../src/categories/Categories.jsx'
 import { categoryMutationRequest, folderContentsRequest } from '../src/categories/category-queries.js'
-import { createCutController, filterAndSortItems, flattenCategories, normalizeFileManagerItems } from '../src/categories/category-utils.js'
+import { createCutController, exitTrashThen, filterAndSortItems, flattenCategories, normalizeFileManagerItems } from '../src/categories/category-utils.js'
 
 function renderFileManager() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -35,6 +36,7 @@ describe('File Manager frontend', () => {
     expect(html).toContain('Add File')
     expect(html).toContain('Move to')
     expect(html).toContain('Recently Deleted')
+    expect(html).not.toContain('Back to files')
     expect(html).not.toContain('type="checkbox"')
     expect(html).not.toContain('>Archive<')
     expect(html).not.toContain('>Copy<')
@@ -63,6 +65,26 @@ describe('File Manager frontend', () => {
     clipboard.set([item])
     await expect(clipboard.paste('broken-folder', async () => { throw new Error('move failed') })).rejects.toThrow('move failed')
     expect(clipboard.get()).toEqual([item])
+  })
+
+  it('exits Recently Deleted before folder navigation, New Folder, and Add File actions', () => {
+    for (const actionName of ['folder navigation', 'New Folder', 'Add File']) {
+      const setTrashMode = vi.fn()
+      const action = vi.fn(() => actionName)
+      expect(exitTrashThen(setTrashMode, action)).toBe(actionName)
+      expect(setTrashMode).toHaveBeenCalledWith(false)
+      expect(action).toHaveBeenCalledOnce()
+    }
+  })
+
+  it('uses one readable File Manager type scale and yellow folder visuals', () => {
+    const css = readFileSync(new URL('../src/categories/categories.css', import.meta.url), 'utf8')
+    expect(css).toContain("font-family:'Noto Sans Myanmar','Pyidaungsu','Myanmar Text','Segoe UI',sans-serif")
+    expect(css).toContain('.fm-item-icon.folder{color:#f2ad19}')
+    expect(css).toContain('.fm-tree-name svg{width:22px;height:22px;flex:0 0 auto;color:#f2ad19}')
+    expect(css).toContain('.fm-destination-list button>svg{width:24px;height:24px;color:#f2ad19}')
+    expect(css).not.toMatch(/font-size:(?:8|9|10|11)px/)
+    expect(css).not.toMatch(/font-weight:(?:720|750|760|800|820)/)
   })
 
   it('composes direct current-folder contents from existing real APIs', async () => {

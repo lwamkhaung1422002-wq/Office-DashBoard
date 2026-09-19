@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import Login from './auth/LoginForm.jsx'
 import Categories from './categories/Categories.jsx'
-import { DataRecordsPage, DocumentsPage } from './records/FilteredModules.jsx'
+import { DataRecordsPage } from './records/FilteredModules.jsx'
 import { getToken, logout as clearSession } from './api.js'
+import { adminNavigation } from './admin-navigation.js'
 import './App.css'
 import './presentation.css'
 import './presentation-polish.css'
@@ -20,7 +21,7 @@ const records = [
   ['၀၂ စက်တင်ဘာ ၂၀၂၆','ဘဏ္ဍာရေးဌာန','FIN-2609-038','လစဉ်အသုံးစရိတ်အစီရင်ခံစာ','အစီရင်ခံစာ','ပြီးစီးပြီး','August_Office_Return.xlsx'],
 ]
 const imports=[['September_Report.xlsx','၀၉ စက်တင်ဘာ ၂၀၂၆','၂၅၀','အတည်ပြုပြီး'],['August_Office_Return.xlsx','၃၁ ဩဂုတ် ၂၀၂၆','၁၉၈','အတည်ပြုပြီး'],['Q3_Activity_Register.xlsx','၀၁ ဇူလိုင် ၂၀၂၆','၃၁၂','အတည်ပြုပြီး']]
-const nav=[['overview','ပင်မစာမျက်နှာ','⌂'],['categories','File Manager','✣'],['entry','ဒေတာများ','▦'],['reports','စာရွက်စာတမ်းများ','▣'],['prep','အသုံးပြုသူများ','♟'],['preview','အစီရင်ခံစာများ','▥'],['activity','လုပ်ဆောင်ချက်မှတ်တမ်း','◷']]
+const nav=adminNavigation
 function Badge({children}){return <span className={'badge '+children.replaceAll(' ','-')}>{children}</span>}
 function App(){
   const [logged,setLogged]=useState(()=>Boolean(getToken()))
@@ -42,8 +43,8 @@ function App(){
       <div className="drawer-brand"><div className="drawer-mark">▤</div><div className="drawer-brand-copy"><b>အစိုးရရုံး အချက်အလက်စနစ်</b><small>Government Data Management System</small></div></div>
       <div className="drawer-nav-groups">
         <div className="drawer-section"><span className="drawer-section-title">အနှစ်ချုပ်</span><nav>{navItems(nav.slice(0,1))}</nav></div>
-        <div className="drawer-section"><span className="drawer-section-title">ဒေတာစီမံခန့်ခွဲမှု</span><nav>{navItems(nav.slice(1,4))}</nav></div>
-        <div className="drawer-section"><span className="drawer-section-title">စနစ်စီမံခန့်ခွဲမှု</span><nav>{navItems(nav.slice(4,7))}</nav></div>
+        <div className="drawer-section"><span className="drawer-section-title">ဒေတာစီမံခန့်ခွဲမှု</span><nav>{navItems(nav.slice(1,3))}</nav></div>
+        <div className="drawer-section"><span className="drawer-section-title">စနစ်စီမံခန့်ခွဲမှု</span><nav>{navItems(nav.slice(3,6))}</nav></div>
       </div>
       <div className="side-foot"><button title="စနစ်ဆက်တင်များ"><em>⚙</em><span className="foot-label">စနစ်ဆက်တင်များ</span></button><button onClick={()=>{clearSession();setLogged(false)}} title="စနစ်မှ ထွက်ရန်"><em>↩</em><span className="foot-label">စနစ်မှ ထွက်ရန်</span></button><small>ဗားရှင်း 1.0.0<br/>© ၂၀၂၆ အစိုးရ အချက်အလက်စနစ်</small></div>
     </aside>
@@ -52,7 +53,7 @@ function App(){
       {!['entry','categories'].includes(page)&&<div className="page-context"><small>Workspace / {nav.find(n=>n[0]===page)?.[1]}</small><h2>{nav.find(n=>n[0]===page)?.[1]}</h2></div>}
       {page==='overview'&&<Overview go={setPage}/>}
       {page==='categories'&&<Categories onViewData={(categoryId,collectionId)=>{setCategoryFilter(categoryId);setCollectionFilter(collectionId);setPage('entry')}}/>}
-      {page==='entry'&&<DataRecordsPage categoryId={categoryFilter} dataCollectionId={collectionFilter}/>} {page==='reports'&&<DocumentsPage categoryId={categoryFilter}/>} {page==='activity'&&<Activity/>}
+      {page==='entry'&&<DataRecordsPage categoryId={categoryFilter} dataCollectionId={collectionFilter} onOpenCollection={setCollectionFilter} onClearCollection={()=>setCollectionFilter(null)}/>} {page==='activity'&&<Activity/>}
       {page==='prep'&&<Prep go={setPage}/>} {page==='preview'&&<Preview published={published} setPublished={setPublished} open={enter}/>}
     </main>
   </div>

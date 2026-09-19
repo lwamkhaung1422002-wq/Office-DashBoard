@@ -29,6 +29,30 @@ export function fieldInputType(type) {
   return 'text'
 }
 
+export function generateRecordTitle({ fields = [], payload = {}, existingTitle = '', collectionName = '' }) {
+  if (existingTitle.trim()) return existingTitle.trim()
+  const textField = fields.find(field => field.type === 'TEXT' && String(payload[field.key] ?? '').trim())
+  if (textField) return String(payload[textField.key]).trim()
+  return `Record - ${collectionName.trim() || 'Structured Data'}`
+}
+
+export function handleCollectionEnter(event, item, selectedId, onOpen) {
+  if (event.key !== 'Enter' || selectedId !== item.id) return false
+  event.preventDefault()
+  onOpen(item)
+  return true
+}
+
+export function clearCollectionContext({ setCollection, setSelectedCollectionId, onClearCollection }) {
+  setCollection(null)
+  setSelectedCollectionId(null)
+  onClearCollection?.()
+}
+
+export function dataCollectionDetailsRequest(id) {
+  return api(`/data/collections/${id}`)
+}
+
 export function createRecordRequest({ title, accessLevel, payload, categoryId, dataCollectionId }) {
   return api('/admin/data', { method: 'POST', body: JSON.stringify({ title, accessLevel, payload, categoryId, dataCollectionId }) })
 }
