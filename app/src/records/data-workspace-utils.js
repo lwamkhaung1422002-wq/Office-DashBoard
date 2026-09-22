@@ -56,3 +56,64 @@ export function dataCollectionDetailsRequest(id) {
 export function createRecordRequest({ title, accessLevel, payload, categoryId, dataCollectionId }) {
   return api('/admin/data', { method: 'POST', body: JSON.stringify({ title, accessLevel, payload, categoryId, dataCollectionId }) })
 }
+
+export function updateRecordRequest(id, body) {
+  return api(`/admin/data/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+}
+
+export function archiveRecordRequest(id) {
+  return api(`/admin/data/${id}/archive`, { method: 'POST' })
+}
+
+export function widgetFieldChoices(fields = [], chartType = 'KPI') {
+  return {
+    dimensions: fields.filter(field => chartType === 'LINE' ? field.type === 'DATE' : ['TEXT', 'ENUM'].includes(field.type)),
+    measures: fields.filter(field => field.type === 'NUMBER'),
+  }
+}
+
+export function widgetRequestBody(form, dataCollectionId) {
+  return {
+    title: form.title.trim(),
+    dataCollectionId,
+    chartType: form.chartType,
+    dimensionFieldId: form.dimensionFieldId || null,
+    measureFieldId: form.aggregation === 'COUNT' ? null : form.measureFieldId || null,
+    aggregation: form.aggregation,
+    timeGrouping: form.chartType === 'LINE' ? form.timeGrouping || 'MONTH' : null,
+    accessLevel: form.accessLevel,
+    sortOrder: Number(form.sortOrder || 0),
+    isActive: true,
+  }
+}
+
+export async function loadCollectionDashboard(dataCollectionId) {
+  const widgets = await api(`/admin/dashboard-widgets?dataCollectionId=${encodeURIComponent(dataCollectionId)}`)
+  return Promise.all(widgets.map(async widget => {
+    const preview = await api(`/admin/dashboard-widgets/${widget.id}/preview`)
+    return { widget, data: preview.data }
+  }))
+}
+
+export function previewDashboardWidget(body) {
+  return api('/admin/dashboard-widgets/preview', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function saveDashboardWidget(body, widgetId = null) {
+  return api(widgetId ? `/admin/dashboard-widgets/${widgetId}` : '/admin/dashboard-widgets', { method: widgetId ? 'PATCH' : 'POST', body: JSON.stringify(body) })
+}
+
+export function archiveDashboardWidget(id) {
+  return api(`/admin/dashboard-widgets/${id}/archive`, { method: 'POST' })
+}
+
+export function reorderDashboardWidgets(items) {
+  return Promise.all(items.map((item, sortOrder) => api(`/admin/dashboard-widgets/${item.widget.id}`, { method: 'PATCH', body: JSON.stringify({ sortOrder }) })))
+}
+
+export function topSeriesWithOthers(series = [], limit = 9) {
+  if (series.length <= limit) return series
+  const visible = series.slice(0, limit)
+  const otherValue = series.slice(limit).reduce((total, item) => total + Number(item.value || 0), 0)
+  return [...visible, { label: 'Others', value: otherValue }]
+}

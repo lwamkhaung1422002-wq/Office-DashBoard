@@ -75,8 +75,8 @@ export function createDashboardService(prisma) {
     return value
   }
   return {
-    listAdmin() {
-      return prisma.dashboardWidget.findMany({ where: { archivedAt: null, dataCollection: { archivedAt: null } }, include: includeDefinition, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] })
+    listAdmin(dataCollectionId) {
+      return prisma.dashboardWidget.findMany({ where: { archivedAt: null, dataCollection: { archivedAt: null }, ...(dataCollectionId ? { dataCollectionId } : {}) }, include: includeDefinition, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] })
     },
     get: widget,
     async create(input, actorId) {
@@ -108,6 +108,11 @@ export function createDashboardService(prisma) {
     },
     async preview(id, role = 'ADMIN') {
       const selected = await widget(id)
+      return { widget: selected, data: await aggregateWidget(prisma, selected, role) }
+    },
+    async previewConfiguration(input, role = 'ADMIN') {
+      const { dimension, measure, savedFilters } = validateWidgetConfiguration(input, await fieldsForCollection(input.dataCollectionId))
+      const selected = { ...input, dimensionField: dimension, measureField: measure, savedFilters }
       return { widget: selected, data: await aggregateWidget(prisma, selected, role) }
     },
     async viewerDashboard(role) {

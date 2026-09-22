@@ -8,37 +8,27 @@ import DriveFileMoveOutlined from '@mui/icons-material/DriveFileMoveOutlined'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import EditOutlined from '@mui/icons-material/EditOutlined'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
-import FolderOpenRounded from '@mui/icons-material/FolderOpenRounded'
 import FolderRounded from '@mui/icons-material/FolderRounded'
 import GridViewRounded from '@mui/icons-material/GridViewRounded'
 import HomeRounded from '@mui/icons-material/HomeRounded'
 import HistoryRounded from '@mui/icons-material/HistoryRounded'
-import ImageRounded from '@mui/icons-material/ImageRounded'
 import InfoOutlined from '@mui/icons-material/InfoOutlined'
 import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded'
 import MoreVertRounded from '@mui/icons-material/MoreVertRounded'
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded'
-import PictureAsPdfRounded from '@mui/icons-material/PictureAsPdfRounded'
 import RestoreFromTrashRounded from '@mui/icons-material/RestoreFromTrashRounded'
 import SearchRounded from '@mui/icons-material/SearchRounded'
 import SortRounded from '@mui/icons-material/SortRounded'
-import TableChartRounded from '@mui/icons-material/TableChartRounded'
 import UploadFileRounded from '@mui/icons-material/UploadFileRounded'
 import ViewListRounded from '@mui/icons-material/ViewListRounded'
 import { api, apiBlob } from '../api.js'
+import { SemanticFileIcon as ItemIcon } from '../shared/SemanticFileIcon.jsx'
 import { categoryKeys, useCategoryMutation, useCategoryTree, useFolderContents } from './category-queries.js'
 import { categoryDescendantIds, createCutController, exitTrashThen, filterAndSortItems, flattenCategories, isEditingTarget, normalizeFileManagerItems } from './category-utils.js'
 import './categories.css'
 
 const itemKey = item => `${item.itemType}:${item.id}`
 const user = () => JSON.parse(sessionStorage.getItem('office_user') || '{}')
-
-function ItemIcon({ type }) {
-  if (type === 'FOLDER') return <FolderRounded />
-  if (type === 'DATA') return <TableChartRounded />
-  if (type === 'PDF') return <PictureAsPdfRounded />
-  return <ImageRounded />
-}
 
 function FolderTree({ nodes, selectedId, expanded, onToggle, onSelect, onContext, depth = 0 }) {
   return nodes.map(node => {
@@ -50,7 +40,7 @@ function FolderTree({ nodes, selectedId, expanded, onToggle, onSelect, onContext
           {hasChildren && (opened ? <ExpandMoreRounded /> : <ChevronRightRounded />)}
         </button>
         <button type="button" className="fm-tree-name" onClick={() => onSelect(node.id)} onDoubleClick={() => hasChildren && onToggle(node.id)}>
-          {opened ? <FolderOpenRounded /> : <FolderRounded />}<span>{node.name}</span>
+          <ItemIcon type="FOLDER" open={opened} /><span>{node.name}</span>
         </button>
       </div>
       {opened && hasChildren && <FolderTree nodes={node.children} selectedId={selectedId} expanded={expanded} onToggle={onToggle} onSelect={onSelect} onContext={onContext} depth={depth + 1} />}
@@ -150,7 +140,7 @@ function UploadDialog({ upload, setUpload, folderId, onDone }) {
     <section className="fm-dialog fm-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title">
       <header><div><small>Add File</small><h2 id="upload-dialog-title">{upload.mode === 'excel' ? 'Import Excel Data' : 'Upload Document'}</h2></div><button onClick={close} disabled={busy} aria-label="ပိတ်ရန်"><CloseRounded /></button></header>
       <div className="fm-dialog-body">
-        <p className="fm-dialog-note">{upload.mode === 'excel' ? <TableChartRounded /> : upload.file.type === 'application/pdf' ? <PictureAsPdfRounded /> : <ImageRounded />}<span><b>{upload.file?.name || upload.job?.originalFileName}</b><small>{upload.mode === 'excel' ? 'Database ထဲသို့ structured data အဖြစ် import လုပ်မည်' : 'ရွေးထားသည့် Folder ထဲသို့ upload လုပ်မည်'}</small></span></p>
+        <p className="fm-dialog-note"><ItemIcon type={upload.mode === 'excel' ? 'DATA' : upload.file.type === 'application/pdf' ? 'PDF' : 'IMAGE'} /><span><b>{upload.file?.name || upload.job?.originalFileName}</b><small>{upload.mode === 'excel' ? 'Database ထဲသို့ structured data အဖြစ် import လုပ်မည်' : 'ရွေးထားသည့် Folder ထဲသို့ upload လုပ်မည်'}</small></span></p>
         {upload.mode === 'document' ? <>
           <label className="fm-field">Title<input value={upload.title} onChange={event => setUpload(current => ({ ...current, title: event.target.value }))} autoFocus /></label>
           <label className="fm-field">Access<select value={upload.accessLevel} onChange={event => setUpload(current => ({ ...current, accessLevel: event.target.value }))}><option value="NORMAL">Normal</option><option value="VIP">VIP</option><option value="ADMIN">Admin only</option></select></label>
@@ -512,7 +502,7 @@ export default function Categories({ onViewData }) {
                   <span><button className="fm-kebab" onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); openMenu({ ...event, clientX: rect.right - 8, clientY: rect.bottom + 4, preventDefault: () => event.preventDefault(), stopPropagation: () => event.stopPropagation() }, item) }} aria-label={`${item.name} actions`}><MoreVertRounded /></button></span>
                 </div>
               })}
-              {!newFolder && !visibleItems.length && <div className="fm-state"><FolderOpenRounded /><b>This folder is empty</b><span>New Folder ဖန်တီးပါ သို့မဟုတ် File ထည့်ပါ</span></div>}
+              {!newFolder && !visibleItems.length && <div className="fm-state"><ItemIcon type="FOLDER" open /><b>This folder is empty</b><span>New Folder ဖန်တီးပါ သို့မဟုတ် File ထည့်ပါ</span></div>}
             </div> : <div className="fm-grid">
               {newFolder && <article className="fm-grid-card editing"><span className="fm-item-icon folder"><FolderRounded /></span><input value={newFolderName} onChange={event => setNewFolderName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { newFolderBlurAction.current = 'save'; createFolder() } if (event.key === 'Escape') { newFolderBlurAction.current = 'cancel'; setNewFolder(false) } }} onBlur={() => { if (newFolderBlurAction.current) { newFolderBlurAction.current = ''; return } createFolder() }} autoFocus placeholder="New folder" /></article>}
               {visibleItems.map(item => { const key = itemKey(item); return <article key={key} className={`fm-grid-card ${selection.has(key) ? 'selected' : ''} ${cutKeys.has(key) ? 'cut' : ''}`} onClick={event => selectItem(event, item)} onDoubleClick={() => openItem(item)} onContextMenu={event => openMenu(event, item)}><span className={`fm-item-icon ${item.itemType.toLowerCase()}`}><ItemIcon type={item.itemType} /></span><div>{rename?.key === key ? <input value={rename.name} onChange={event => setRename(current => ({ ...current, name: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') { renameBlurAction.current = 'save'; renameItem(item, rename.name) } if (event.key === 'Escape') { renameBlurAction.current = 'cancel'; setRename(null) } }} onBlur={() => { if (renameBlurAction.current) { renameBlurAction.current = ''; return } renameItem(item, rename.name) }} autoFocus /> : <b>{item.name}</b>}<small>{item.typeLabel} · {item.sizeLabel}</small></div><button className="fm-kebab" onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); openMenu({ ...event, clientX: rect.right - 8, clientY: rect.bottom + 4, preventDefault: () => event.preventDefault(), stopPropagation: () => event.stopPropagation() }, item) }}><MoreVertRounded /></button></article>})}
