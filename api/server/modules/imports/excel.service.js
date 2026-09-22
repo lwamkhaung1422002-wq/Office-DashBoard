@@ -131,7 +131,7 @@ export function createExcelImportService(prisma, storage) {
           let collectionId = job.dataCollectionId
           let fields = job.inspection.fields
           if (!collectionId) {
-            const collection = await tx.dataCollection.create({ data: { categoryId: job.categoryId, name: collectionName || basename(job.originalFileName, extname(job.originalFileName)), defaultAccessLevel, createdById: actorId } })
+            const collection = await tx.dataCollection.create({ data: { categoryId: job.categoryId, name: collectionName || basename(job.originalFileName, extname(job.originalFileName)), defaultAccessLevel, createdById: actorId, updatedById: actorId } })
             collectionId = collection.id
             await tx.dataField.createMany({ data: fields.map(field => ({ ...field, dataCollectionId: collectionId })) })
           } else {
@@ -140,7 +140,7 @@ export function createExcelImportService(prisma, storage) {
             if (!same) throw new DomainError(422, 'FIELD_MAPPING_REQUIRED', 'Workbook columns do not match the selected data collection')
             fields = existing
           }
-          await tx.dataRecord.createMany({ data: parsed.rows.map((row, index) => ({ title: String(row.data[fields[0].key] ?? `Row ${index + 1}`), payload: row.data, categoryId: job.categoryId, dataCollectionId: collectionId, accessLevel: defaultAccessLevel, sourceType: 'EXCEL', sourceImportId: job.id, createdById: actorId })) })
+          await tx.dataRecord.createMany({ data: parsed.rows.map((row, index) => ({ title: String(row.data[fields[0].key] ?? `Row ${index + 1}`), payload: row.data, categoryId: job.categoryId, dataCollectionId: collectionId, accessLevel: defaultAccessLevel, sourceType: 'EXCEL', sourceImportId: job.id, createdById: actorId, updatedById: actorId })) })
           const completed = await tx.importJob.update({ where: { id }, data: { status: 'COMPLETED', dataCollectionId: collectionId, totalRows: parsed.totalRows, validRows: parsed.validRows, invalidRows: 0, completedAt: new Date() } })
           await createAuditService(tx).record({ actorId, action: 'EXCEL_IMPORTED', entityType: 'ImportJob', entityId: id, after: { collectionId, rows: parsed.validRows, originalFileName: job.originalFileName } })
           return completed

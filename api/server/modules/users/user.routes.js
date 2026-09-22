@@ -5,17 +5,59 @@ import { createUserService } from './user.service.js'
 
 const idSchema = z.object({ id: z.string().cuid() })
 const role = z.enum(['ADMIN', 'NORMAL_VIEWER', 'VIP_VIEWER'])
-const createSchema = z.object({ email: z.string().email().max(254), name: z.string().trim().min(1).max(120), role: role.default('NORMAL_VIEWER') })
-const updateSchema = z.object({ name: z.string().trim().min(1).max(120).optional(), role: role.optional(), isActive: z.boolean().optional() }).refine(value => Object.keys(value).length > 0, 'At least one field is required')
+const inviteSchema = z.object({
+  email: z.string().trim().email().max(254),
+  name: z.string().trim().min(1).max(120),
+  role: role.default('NORMAL_VIEWER'),
+})
+const updateSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  role: role.optional(),
+  isActive: z.boolean().optional(),
+}).refine(value => Object.keys(value).length > 0, 'At least one field is required')
+const linkSchema = z.object({ token: z.string().min(32).max(512) })
+const completeSchema = linkSchema.extend({ password: z.string().min(12).max(128) })
+
+const accessLevels = [
+  { role: 'ADMIN', label: 'Administrator', description: 'Manage accounts, categories, data, documents, dashboards, reports, and audit history.' },
+  { role: 'VIP_VIEWER', label: 'VIP Viewer', description: 'View NORMAL and VIP content. Administration tools are not available.' },
+  { role: 'NORMAL_VIEWER', label: 'Normal Viewer', description: 'View content marked for normal access. Administration tools are not available.' },
+]
 
 export function userRoutes(prisma) {
   const router = Router()
   const service = createUserService(prisma)
   router.use(requireRoles('ADMIN'))
   router.get('/', async (_req, res) => res.json({ data: await service.list() }))
+  router.get('/access-levels', (_req, res) => res.json({ data: accessLevels }))
+  router.post('/', async (req, res) => res.status(201).json({ data: await service.invite(inviteSchema.parse(req.body), req.user.id) }))
+  router.post('/invitations', async (req, res) => res.status(201).json({ data: await service.invite(inviteSchema.parse(req.body), req.user.id) }))
+  router.post('/invitations/:id/regenerate', async (req, res) => res.json({ data: await service.regenerateInvite(idSchema.parse(req.params).id, req.user.id) }))
+  router.post('/invitations/:id/cancel', async (req, res) => {
+    await service.cancelInvite(idSchema.parse(req.params).id, req.user.id)
+    res.status(204).end()
+  })
   router.get('/:id', async (req, res) => res.json({ data: await service.get(idSchema.parse(req.params).id) }))
-  router.post('/', async (req, res) => res.status(201).json({ data: await service.create(createSchema.parse(req.body), req.user.id) }))
   router.patch('/:id', async (req, res) => res.json({ data: await service.update(idSchema.parse(req.params).id, updateSchema.parse(req.body), req.user.id) }))
-  router.post('/:id/reset-password', async (req, res) => res.json({ data: await service.resetPassword(idSchema.parse(req.params).id, req.user.id) }))
+  router.post('/:id/disable', async (req, res) => res.json({ data: await service.update(idSchema.parse(req.params).id, { isActive: false }, req.user.id) }))
+  router.post('/:id/enable', async (req, res) => res.json({ data: await service.update(idSchema.parse(req.params).id, { isActive: true }, req.user.id) }))
+  router.post('/:id/reset-login', async (req, res) => res.status(201).json({ data: await service.resetLogin(idSchema.parse(req.params).id, req.user.id) }))
+  router.post('/:id/reset-password', async (req, res) => res.status(201).json({ data: await service.resetLogin(idSchema.parse(req.params).id, req.user.id) }))
+  return router
+}
+
+export function accountLinkRoutes(prisma) {
+  const router = Router()
+  const service = createUserService(prisma)
+  router.get('/account/setup', async (req, res) => res.json({ data: await service.validateSetup(linkSchema.parse(req.query).token) }))
+  router.post('/account/setup', async (req, res) => {
+    const input = completeSchema.parse(req.body)
+    res.json({ data: await service.completeSetup(input.token, input.password) })
+  })
+  router.get('/account/reset', async (req, res) => res.json({ data: await service.validateReset(linkSchema.parse(req.query).token) }))
+  router.post('/account/reset', async (req, res) => {
+    const input = completeSchema.parse(req.body)
+    res.json({ data: await service.completeReset(input.token, input.password) })
+  })
   return router
 }

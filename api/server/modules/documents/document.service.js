@@ -6,8 +6,9 @@ import { makeStorageKey } from '../../lib/storage.js'
 
 const metadataSelect = {
   id: true, title: true, description: true, fileName: true, mimeType: true,
-  fileSize: true, accessLevel: true, categoryId: true, createdById: true,
+  fileSize: true, accessLevel: true, categoryId: true, createdById: true, updatedById: true,
   createdBy: { select: { name: true } },
+  updatedBy: { select: { name: true } },
   archivedAt: true, createdAt: true, updatedAt: true,
 }
 
@@ -23,7 +24,7 @@ export function createDocumentService(prisma, storage) {
   const accessWhere = role => ({ accessLevel: { in: allowedAccessLevels(role) } })
 
   async function internal(id, role, includeArchived = false) {
-    const document = await prisma.document.findFirst({ where: { id, ...accessWhere(role), ...(includeArchived ? {} : { archivedAt: null }) } })
+    const document = await prisma.document.findFirst({ where: { id, ...accessWhere(role), ...(includeArchived ? {} : { archivedAt: null }) }, include: { createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } } })
     if (!document) throw notFound('Document')
     return document
   }
@@ -57,7 +58,7 @@ export function createDocumentService(prisma, storage) {
       const storageKey = makeStorageKey('documents', file.originalname)
       await storage.putObject({ key: storageKey, body: file.buffer, contentType: file.mimetype })
       return prisma.$transaction(async tx => {
-        const created = await tx.document.create({ data: { title, description: description || null, fileName: file.originalname, mimeType: file.mimetype, fileSize: file.size, storageKey, categoryId, accessLevel, createdById: actorId }, select: metadataSelect })
+        const created = await tx.document.create({ data: { title, description: description || null, fileName: file.originalname, mimeType: file.mimetype, fileSize: file.size, storageKey, categoryId, accessLevel, createdById: actorId, updatedById: actorId }, select: metadataSelect })
         await createAuditService(tx).record({ actorId, action: 'DOCUMENT_UPLOADED', entityType: 'Document', entityId: created.id, after: created })
         return created
       })
@@ -69,7 +70,7 @@ export function createDocumentService(prisma, storage) {
         if (!category) throw new DomainError(422, 'INVALID_CATEGORY', 'The selected category is unavailable')
       }
       return prisma.$transaction(async tx => {
-        const after = await tx.document.update({ where: { id }, data: input, select: metadataSelect })
+        const after = await tx.document.update({ where: { id }, data: { ...input, updatedById: actorId }, select: metadataSelect })
         await createAuditService(tx).record({ actorId, action: 'DOCUMENT_UPDATED', entityType: 'Document', entityId: id, before, after })
         return after
       })
@@ -78,7 +79,7 @@ export function createDocumentService(prisma, storage) {
       const before = await internal(id, 'ADMIN', true)
       if (before.archivedAt) return before
       return prisma.$transaction(async tx => {
-        const after = await tx.document.update({ where: { id }, data: { archivedAt: new Date() }, select: metadataSelect })
+        const after = await tx.document.update({ where: { id }, data: { archivedAt: new Date(), updatedById: actorId }, select: metadataSelect })
         await createAuditService(tx).record({ actorId, action: 'DOCUMENT_ARCHIVED', entityType: 'Document', entityId: id, before, after })
         return after
       })
@@ -89,7 +90,7 @@ export function createDocumentService(prisma, storage) {
       const category = await prisma.category.findFirst({ where: { id: before.categoryId, archivedAt: null }, select: { id: true } })
       if (!category) throw new DomainError(409, 'ARCHIVED_CATEGORY', 'Restore the containing folder before restoring this document')
       return prisma.$transaction(async tx => {
-        const after = await tx.document.update({ where: { id }, data: { archivedAt: null }, select: metadataSelect })
+        const after = await tx.document.update({ where: { id }, data: { archivedAt: null, updatedById: actorId }, select: metadataSelect })
         await createAuditService(tx).record({ actorId, action: 'DOCUMENT_RESTORED', entityType: 'Document', entityId: id, before, after })
         return after
       })

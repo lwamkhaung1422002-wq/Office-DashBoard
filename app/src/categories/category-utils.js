@@ -22,14 +22,14 @@ export function normalizeFileManagerItems({ folders = [], dataItems = [], docume
       itemType: 'FOLDER',
       typeLabel: 'Folder',
       sizeLabel: `${(folder.children?.length || 0) + (folder.directDataCount || 0) + (folder.directDocumentCount || 0)} items`,
-      modifiedBy: folder.createdBy?.name || '—',
+      modifiedBy: folder.updatedBy?.name || folder.createdBy?.name || '—',
     })),
     ...dataItems.map(item => ({
       ...item,
       itemType: 'DATA',
       typeLabel: 'Data',
       sizeLabel: `${item._count?.records || 0} records`,
-      modifiedBy: item.createdBy?.name || '—',
+      modifiedBy: item.updatedBy?.name || item.createdBy?.name || '—',
     })),
     ...documents.map(item => ({
       ...item,
@@ -37,7 +37,7 @@ export function normalizeFileManagerItems({ folders = [], dataItems = [], docume
       itemType: item.mimeType === 'application/pdf' ? 'PDF' : 'IMAGE',
       typeLabel: item.mimeType === 'application/pdf' ? 'PDF' : 'Image',
       sizeLabel: formatBytes(item.fileSize),
-      modifiedBy: item.createdBy?.name || '—',
+      modifiedBy: item.updatedBy?.name || item.createdBy?.name || '—',
     })),
   ]
 }

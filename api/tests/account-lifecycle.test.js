@@ -1,0 +1,124 @@
+import bcrypt from 'bcryptjs'
+import { describe, expect, it } from 'vitest'
+import { createUserService } from '../server/modules/users/user.service.js'
+import { hashAccountToken } from '../server/modules/users/account-tokens.js'
+import { createAuthService } from '../server/modules/auth/auth.service.js'
+
+const pick = (row, select) => select ? Object.fromEntries(Object.keys(select).filter(key => select[key]).map(key => [key, row[key]])) : row
+
+function memoryDatabase() {
+  const state = { users: [], invites: [], resets: [], refreshTokens: [], audits: [] }
+  let sequence = 0
+  const active = row => !row.acceptedAt && !row.usedAt && !row.revokedAt && row.expiresAt > new Date()
+  const db = {
+    state,
+    user: {
+      findUnique: async ({ where, select }) => {
+        const row = state.users.find(item => item.id === where.id || item.email === where.email) || null
+        return row ? pick(row, select) : null
+      },
+      findMany: async () => state.users,
+      create: async ({ data, select }) => {
+        const row = { id: `user-${++sequence}`, isPrimaryAdmin: false, lastLoginAt: null, createdAt: new Date(), updatedAt: new Date(), ...data }
+        state.users.push(row)
+        return pick(row, select)
+      },
+      update: async ({ where, data, select }) => {
+        const row = state.users.find(item => item.id === where.id)
+        Object.assign(row, data, { updatedAt: new Date() })
+        return pick(row, select)
+      },
+    },
+    accountInvite: {
+      findUnique: async ({ where }) => state.invites.find(item => item.id === where.id || item.tokenHash === where.tokenHash) || null,
+      findUniqueOrThrow: async ({ where }) => state.invites.find(item => item.id === where.id),
+      findFirst: async ({ where }) => state.invites.find(item => (!where.id || item.id === where.id) && (!where.email || item.email === where.email) && active(item)) || null,
+      findMany: async () => state.invites.filter(item => !item.acceptedAt && !item.revokedAt),
+      create: async ({ data }) => {
+        const row = { id: `invite-${++sequence}`, acceptedAt: null, revokedAt: null, createdAt: new Date(), updatedAt: new Date(), ...data }
+        state.invites.push(row)
+        return row
+      },
+      updateMany: async ({ where, data }) => {
+        const rows = state.invites.filter(item => (!where.id || item.id === where.id) && (!where.email || item.email === where.email) && !item.acceptedAt && !item.revokedAt)
+        rows.forEach(item => Object.assign(item, data, { updatedAt: new Date() }))
+        return { count: rows.length }
+      },
+    },
+    accountPasswordResetToken: {
+      findUnique: async ({ where }) => {
+        const row = state.resets.find(item => item.tokenHash === where.tokenHash)
+        return row ? { ...row, user: state.users.find(user => user.id === row.userId) } : null
+      },
+      findFirst: async ({ where }) => state.resets.find(item => item.id === where.id && active(item)) || null,
+      create: async ({ data }) => {
+        const row = { id: `reset-${++sequence}`, usedAt: null, revokedAt: null, createdAt: new Date(), ...data }
+        state.resets.push(row)
+        return row
+      },
+      update: async ({ where, data }) => Object.assign(state.resets.find(item => item.id === where.id), data),
+      updateMany: async ({ where, data }) => {
+        const rows = state.resets.filter(item => (!where.userId || item.userId === where.userId) && (!where.id?.not || item.id !== where.id.not) && !item.usedAt && !item.revokedAt)
+        rows.forEach(item => Object.assign(item, data))
+        return { count: rows.length }
+      },
+    },
+    refreshToken: {
+      updateMany: async ({ where, data }) => {
+        const rows = state.refreshTokens.filter(item => item.userId === where.userId && !item.revokedAt)
+        rows.forEach(item => Object.assign(item, data))
+        return { count: rows.length }
+      },
+    },
+    auditLog: { create: async ({ data }) => { state.audits.push(data); return data } },
+    $transaction: callback => callback(db),
+  }
+  return db
+}
+
+describe('account invitation and reset lifecycle', () => {
+  it('rotates setup links and accepts an invitation only once', async () => {
+    const db = memoryDatabase()
+    const service = createUserService(db)
+    const first = await service.invite({ email: 'viewer@example.test', name: 'Viewer', role: 'VIP_VIEWER' }, 'admin-1')
+    const firstToken = new URL(first.setupUrl).searchParams.get('token')
+    expect(db.state.invites[0].tokenHash).toBe(hashAccountToken(firstToken))
+    expect(db.state.users).toHaveLength(0)
+
+    const rotated = await service.regenerateInvite(first.invitation.id, 'admin-1')
+    const nextToken = new URL(rotated.setupUrl).searchParams.get('token')
+    await expect(service.validateSetup(firstToken)).rejects.toMatchObject({ code: 'INVALID_ACCOUNT_LINK' })
+    await expect(service.validateSetup(nextToken)).resolves.toMatchObject({ email: 'viewer@example.test' })
+
+    const user = await service.completeSetup(nextToken, 'Strong-password-2026')
+    expect(user.role).toBe('VIP_VIEWER')
+    expect(await bcrypt.compare('Strong-password-2026', db.state.users[0].passwordHash)).toBe(true)
+    await expect(service.completeSetup(nextToken, 'Another-password-2026')).rejects.toMatchObject({ code: 'INVALID_ACCOUNT_LINK' })
+  })
+
+  it('protects the Main Admin from demotion, disablement, and reset', async () => {
+    const db = memoryDatabase()
+    db.state.users.push({ id: 'primary', email: 'admin@example.test', name: 'Main Admin', role: 'ADMIN', isActive: true, isPrimaryAdmin: true })
+    const service = createUserService(db)
+    await expect(service.update('primary', { role: 'VIP_VIEWER' }, 'other-admin')).rejects.toMatchObject({ code: 'PRIMARY_ADMIN_PROTECTED' })
+    await expect(service.update('primary', { isActive: false }, 'other-admin')).rejects.toMatchObject({ code: 'PRIMARY_ADMIN_PROTECTED' })
+    await expect(service.resetLogin('primary', 'other-admin')).rejects.toMatchObject({ code: 'PRIMARY_ADMIN_PROTECTED' })
+  })
+
+  it('rotates reset links, revokes sessions, and consumes the reset token once', async () => {
+    const db = memoryDatabase()
+    db.state.users.push({ id: 'viewer', email: 'viewer@example.test', name: 'Viewer', role: 'NORMAL_VIEWER', isActive: true, isPrimaryAdmin: false, passwordHash: await bcrypt.hash('Old-password-2026', 4) })
+    db.state.refreshTokens.push({ id: 'session-1', userId: 'viewer', revokedAt: null })
+    const service = createUserService(db)
+    const first = await service.resetLogin('viewer', 'admin-1')
+    const firstToken = new URL(first.resetUrl).searchParams.get('token')
+    expect(db.state.refreshTokens[0].revokedAt).toBeInstanceOf(Date)
+    await expect(createAuthService(db).login({ email: 'viewer@example.test', password: 'Old-password-2026' })).rejects.toMatchObject({ code: 'LOGIN_RESET_REQUIRED' })
+    const second = await service.resetLogin('viewer', 'admin-1')
+    const secondToken = new URL(second.resetUrl).searchParams.get('token')
+    await expect(service.validateReset(firstToken)).rejects.toMatchObject({ code: 'INVALID_ACCOUNT_LINK' })
+    await service.completeReset(secondToken, 'New-password-2026')
+    expect(await bcrypt.compare('New-password-2026', db.state.users[0].passwordHash)).toBe(true)
+    await expect(service.completeReset(secondToken, 'Again-password-2026')).rejects.toMatchObject({ code: 'INVALID_ACCOUNT_LINK' })
+  })
+})

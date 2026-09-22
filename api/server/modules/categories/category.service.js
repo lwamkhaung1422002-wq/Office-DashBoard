@@ -13,6 +13,7 @@ const clean = category => ({
   createdAt: category.createdAt,
   updatedAt: category.updatedAt,
   createdBy: category.createdBy ? { name: category.createdBy.name } : null,
+  updatedBy: category.updatedBy ? { name: category.updatedBy.name } : null,
 })
 
 async function siblingExists(db, { name, parentId, excludeId = undefined }) {
@@ -67,7 +68,7 @@ async function loadHierarchy(db, includeArchived = false, role) {
   const where = includeArchived ? {} : activeWhere
   const contentWhere = { ...activeWhere, ...(role ? { accessLevel: { in: allowedAccessLevels(role) } } : {}) }
   const [categories, dataGroups, documentGroups] = await Promise.all([
-    db.category.findMany({ where, include: { createdBy: { select: { name: true } } } }),
+    db.category.findMany({ where, include: { createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } } }),
     db.dataRecord.groupBy({ by: ['categoryId'], where: contentWhere, _count: { _all: true } }),
     db.document.groupBy({ by: ['categoryId'], where: contentWhere, _count: { _all: true } }),
   ])
@@ -127,7 +128,7 @@ export function createCategoryService(prisma) {
         if (await siblingExists(tx, { name: input.name, parentId: input.parentId })) {
           throw new DomainError(409, 'DUPLICATE_CATEGORY', 'A category with this name already exists in the selected location')
         }
-        const category = await tx.category.create({ data: { ...input, parentId: input.parentId ?? null, createdById: actorId } })
+        const category = await tx.category.create({ data: { ...input, parentId: input.parentId ?? null, createdById: actorId, updatedById: actorId } })
         await createAuditService(tx).record({ action: 'CATEGORY_CREATED', entityType: 'Category', entityId: category.id, actorId, before: null, after: clean(category) })
         return clean(category)
       })
@@ -140,7 +141,7 @@ export function createCategoryService(prisma) {
         if (input.name && await siblingExists(tx, { name: input.name, parentId: current.parentId, excludeId: id })) {
           throw new DomainError(409, 'DUPLICATE_CATEGORY', 'A category with this name already exists in the selected location')
         }
-        const updated = await tx.category.update({ where: { id }, data: input })
+        const updated = await tx.category.update({ where: { id }, data: { ...input, updatedById: actorId } })
         await createAuditService(tx).record({ action: 'CATEGORY_UPDATED', entityType: 'Category', entityId: id, actorId, before: clean(current), after: clean(updated) })
         return clean(updated)
       })
@@ -165,7 +166,7 @@ export function createCategoryService(prisma) {
         if (await siblingExists(tx, { name: current.name, parentId, excludeId: id })) {
           throw new DomainError(409, 'DUPLICATE_CATEGORY', 'A category with this name already exists in the selected location')
         }
-        const updated = await tx.category.update({ where: { id }, data: { parentId } })
+        const updated = await tx.category.update({ where: { id }, data: { parentId, updatedById: actorId } })
         await createAuditService(tx).record({ action: 'CATEGORY_MOVED', entityType: 'Category', entityId: id, actorId, before: { parentId: current.parentId }, after: { parentId, parentName: parent?.name ?? null } })
         return clean(updated)
       })
@@ -181,10 +182,10 @@ export function createCategoryService(prisma) {
         const collections = await tx.dataCollection.findMany({ where: { categoryId: { in: ids }, archivedAt: null }, select: { id: true } })
         const collectionIds = collections.map(item => item.id)
         await Promise.all([
-          tx.category.updateMany({ where: { id: { in: ids }, archivedAt: null }, data: { archivedAt } }),
-          tx.dataCollection.updateMany({ where: { id: { in: collectionIds }, archivedAt: null }, data: { archivedAt } }),
-          tx.dataRecord.updateMany({ where: { categoryId: { in: ids }, archivedAt: null }, data: { archivedAt } }),
-          tx.document.updateMany({ where: { categoryId: { in: ids }, archivedAt: null }, data: { archivedAt } }),
+          tx.category.updateMany({ where: { id: { in: ids }, archivedAt: null }, data: { archivedAt, updatedById: actorId } }),
+          tx.dataCollection.updateMany({ where: { id: { in: collectionIds }, archivedAt: null }, data: { archivedAt, updatedById: actorId } }),
+          tx.dataRecord.updateMany({ where: { categoryId: { in: ids }, archivedAt: null }, data: { archivedAt, updatedById: actorId } }),
+          tx.document.updateMany({ where: { categoryId: { in: ids }, archivedAt: null }, data: { archivedAt, updatedById: actorId } }),
         ])
         const updated = { ...category, archivedAt }
         await createAuditService(tx).record({ action: 'CATEGORY_ARCHIVED', entityType: 'Category', entityId: id, actorId, before: clean(category), after: clean(updated), metadata: { subtreeCategories: ids.length, dataCollections: collectionIds.length } })
@@ -209,10 +210,10 @@ export function createCategoryService(prisma) {
         const collections = await tx.dataCollection.findMany({ where: { categoryId: { in: ids }, archivedAt: deletedAt }, select: { id: true } })
         const collectionIds = collections.map(item => item.id)
         await Promise.all([
-          tx.category.updateMany({ where: { id: { in: ids }, archivedAt: deletedAt }, data: { archivedAt: null } }),
-          tx.dataCollection.updateMany({ where: { id: { in: collectionIds }, archivedAt: deletedAt }, data: { archivedAt: null } }),
-          tx.dataRecord.updateMany({ where: { categoryId: { in: ids }, archivedAt: deletedAt }, data: { archivedAt: null } }),
-          tx.document.updateMany({ where: { categoryId: { in: ids }, archivedAt: deletedAt }, data: { archivedAt: null } }),
+          tx.category.updateMany({ where: { id: { in: ids }, archivedAt: deletedAt }, data: { archivedAt: null, updatedById: actorId } }),
+          tx.dataCollection.updateMany({ where: { id: { in: collectionIds }, archivedAt: deletedAt }, data: { archivedAt: null, updatedById: actorId } }),
+          tx.dataRecord.updateMany({ where: { categoryId: { in: ids }, archivedAt: deletedAt }, data: { archivedAt: null, updatedById: actorId } }),
+          tx.document.updateMany({ where: { categoryId: { in: ids }, archivedAt: deletedAt }, data: { archivedAt: null, updatedById: actorId } }),
         ])
         const updated = { ...category, archivedAt: null }
         await createAuditService(tx).record({ action: 'CATEGORY_RESTORED', entityType: 'Category', entityId: id, actorId, before: clean(category), after: clean(updated), metadata: { subtreeCategories: ids.length, dataCollections: collectionIds.length } })

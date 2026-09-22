@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Login from './auth/LoginForm.jsx'
 import Categories from './categories/Categories.jsx'
 import { DataRecordsPage } from './records/FilteredModules.jsx'
-import { getToken, logout as clearSession } from './api.js'
+import { bootstrapSession, getUser, logout as clearSession } from './api.js'
+import AccountsAccess from './accounts/AccountsAccess.jsx'
+import AccountLinkPage from './accounts/AccountLinkPage.jsx'
 import { adminNavigation } from './admin-navigation.js'
 import './App.css'
 import './presentation.css'
@@ -24,7 +26,14 @@ const imports=[['September_Report.xlsx','၀၉ စက်တင်ဘာ ၂၀�
 const nav=adminNavigation
 function Badge({children}){return <span className={'badge '+children.replaceAll(' ','-')}>{children}</span>}
 function App(){
-  const [logged,setLogged]=useState(()=>Boolean(getToken()))
+  const route=window.location.pathname
+  if(route==='/account/setup')return <AccountLinkPage mode="setup"/>
+  if(route==='/account/reset')return <AccountLinkPage mode="reset"/>
+  return <WorkspaceApp/>
+}
+function WorkspaceApp(){
+  const [user,setUser]=useState(()=>getUser())
+  const [checkingSession,setCheckingSession]=useState(true)
   const [page,setPage]=useState('overview')
   const [search,setSearch]=useState('')
   const [published,setPublished]=useState(true)
@@ -36,7 +45,10 @@ function App(){
   const leave=()=>{document.exitFullscreen?.().catch(()=>{});setPresentation(false)}
   const choosePage=(id)=>id==='preview'?enter():setPage(id)
   const navItems=(items)=>items.map(([id,label,icon])=><button className={page===id?'active':''} onClick={()=>choosePage(id)} key={id} title={label}><em>{icon}</em><span className="nav-label">{label}</span></button>)
-  if(!logged)return <Login onLogin={()=>setLogged(true)}/>
+  useEffect(()=>{let active=true;bootstrapSession().then(next=>{if(active)setUser(next)}).finally(()=>{if(active)setCheckingSession(false)});return()=>{active=false}},[])
+  if(checkingSession)return <main className="login"><div className="login-card"><div className="logo">GO</div><p>Session ကို စစ်ဆေးနေသည်...</p></div></main>
+  if(!user)return <Login onLogin={setUser}/>
+  if(user.role!=='ADMIN')return <Dashboard published embedded initialAccess={user.role==='VIP_VIEWER'?1:2} viewerUser={user} onLogout={()=>{setUser(null);void clearSession()}}/>
   if(presentation)return <Dashboard published={published} onBack={leave}/>
   return <div className="app drawer-shell">
     <aside className="temporary-drawer" aria-label="ပင်မလမ်းညွှန်">
@@ -46,15 +58,15 @@ function App(){
         <div className="drawer-section"><span className="drawer-section-title">ဒေတာစီမံခန့်ခွဲမှု</span><nav>{navItems(nav.slice(1,3))}</nav></div>
         <div className="drawer-section"><span className="drawer-section-title">စနစ်စီမံခန့်ခွဲမှု</span><nav>{navItems(nav.slice(3,6))}</nav></div>
       </div>
-      <div className="side-foot"><button title="စနစ်ဆက်တင်များ"><em>⚙</em><span className="foot-label">စနစ်ဆက်တင်များ</span></button><button onClick={()=>{clearSession();setLogged(false)}} title="စနစ်မှ ထွက်ရန်"><em>↩</em><span className="foot-label">စနစ်မှ ထွက်ရန်</span></button><small>ဗားရှင်း 1.0.0<br/>© ၂၀၂၆ အစိုးရ အချက်အလက်စနစ်</small></div>
+      <div className="side-foot"><button title="စနစ်ဆက်တင်များ"><em>⚙</em><span className="foot-label">စနစ်ဆက်တင်များ</span></button><button onClick={()=>{setUser(null);void clearSession()}} title="စနစ်မှ ထွက်ရန်"><em>↩</em><span className="foot-label">စနစ်မှ ထွက်ရန်</span></button><small>ဗားရှင်း 1.0.0<br/>© ၂၀၂၆ အစိုးရ အချက်အလက်စနစ်</small></div>
     </aside>
     <main className="main">
-      <header className="workspace-header"><div className="header-page-title"><span>{nav.find(n=>n[0]===page)?.[1]}</span></div><div className="profile"><button className="notification-button" aria-label="အသိပေးချက် ၅ ခု"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span>5</span></button><span className="avatar">AK</span><div><b>Admin K.</b><small>Administrator</small></div></div></header>
+      <header className="workspace-header"><div className="header-page-title"><span>{nav.find(n=>n[0]===page)?.[1]}</span></div><div className="profile"><button className="notification-button" aria-label="အသိပေးချက် ၅ ခု"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span>5</span></button><span className="avatar">{user.name?.slice(0,2).toUpperCase()}</span><div><b>{user.name}</b><small>{user.isPrimaryAdmin?'Main Administrator':'Administrator'}</small></div></div></header>
       {!['entry','categories'].includes(page)&&<div className="page-context"><small>Workspace / {nav.find(n=>n[0]===page)?.[1]}</small><h2>{nav.find(n=>n[0]===page)?.[1]}</h2></div>}
       {page==='overview'&&<Overview go={setPage}/>}
       {page==='categories'&&<Categories onViewData={(categoryId,collectionId)=>{setCategoryFilter(categoryId);setCollectionFilter(collectionId);setPage('entry')}}/>}
       {page==='entry'&&<DataRecordsPage categoryId={categoryFilter} dataCollectionId={collectionFilter} onOpenCollection={setCollectionFilter} onClearCollection={()=>setCollectionFilter(null)}/>} {page==='activity'&&<Activity/>}
-      {page==='prep'&&<Prep go={setPage}/>} {page==='preview'&&<Preview published={published} setPublished={setPublished} open={enter}/>}
+      {page==='accounts'&&<AccountsAccess/>} {page==='preview'&&<Preview published={published} setPublished={setPublished} open={enter}/>}
     </main>
   </div>
 }
@@ -203,11 +215,11 @@ function Reports(){const [ready,setReady]=useState(false);return <section classN
 function Activity(){const events=[['ယနေ့ ၀၉:၄၂','September_Report.xlsx ကို အချက်အလက် ၂၅၀ ခု တင်သွင်းခဲ့သည်','Excel တင်သွင်းမှု'],['ယနေ့ ၀၈:၁၅','စက်တင်ဘာလ အစည်းအဝေး Dashboard ကို ပြင်ဆင်ခဲ့သည်','အစည်းအဝေး'],['မနေ့ ၁၆:၃၀','ဘတ်ဂျက်အစီရင်ခံစာ အမျိုးအစားအသစ် ထည့်သွင်းခဲ့သည်','အမျိုးအစား'],['၀၇ စက်တင်ဘာ','August_Office_Return.xlsx ကို အတည်ပြုခဲ့သည်','Excel တင်သွင်းမှု']];return <section className="page"><div className="section-title"><div><span className="eyebrow">စနစ်မှတ်တမ်း</span><h3>လုပ်ဆောင်မှုမှတ်တမ်း</h3><p>စနစ်အတွင်း နောက်ဆုံးပြုလုပ်ခဲ့သော လုပ်ဆောင်ချက်များ</p></div></div><div className="activity-layout"><div className="activity-list">{events.map(([time,text,type])=><div className="activity-item" key={time}><div className="activity-dot"></div><div className="activity-copy"><strong>{text}</strong><span>{type} · Admin K.</span></div><time>{time}</time></div>)}</div><div className="activity-summary"><h3>ယနေ့အခြေအနေ</h3><div><b>၂၅</b><span>လုပ်ဆောင်ချက်များ</span></div><div><b>၁၂</b><span>အတည်ပြုထားသော Import</span></div><div><b>၉၈%</b><span>စနစ်အခြေအနေ</span></div></div></div></section>}
 function Prep({go}){return <section className="page"><div className="form-card"><span className="eyebrow">အစည်းအဝေးပြင်ဆင်မှု</span><h3>Presentation Dashboard ပြင်ဆင်ရန်</h3><p>စက်တင်ဘာလ အစည်းအဝေးတွင် ပြသမည့်အချက်အလက်များကို ရွေးချယ်ပါ။</p><label>အစည်းအဝေးအမည်<input defaultValue="စက်တင်ဘာလ လစဉ်ညှိနှိုင်းအစည်းအဝေး"/></label><div className="two"><label>အစည်းအဝေးရက်<input type="date" defaultValue="2026-09-30"/></label><label>ကာလ<select><option>၀၁ စက်တင်ဘာ — ၃၀ စက်တင်ဘာ ၂၀၂၆</option></select></label></div><h4>ဌာနများ</h4><div className="checks">{['ဘဏ္ဍာရေး','အုပ်ချုပ်ရေး','စီမံကိန်း','လူ့စွမ်းအား','လုပ်ငန်း'].map((x,i)=><label key={x}><input type="checkbox" defaultChecked={i<3}/>{x}</label>)}</div><button className="primary" onClick={()=>go('preview')}>Dashboard အစမ်းကြည့်ရန် →</button></div></section>}
 function Preview({published,setPublished,open}){return <section className="page"><div className="preview-head"><div><span className="eyebrow">ADMIN အစမ်းကြည့်မှု</span><h3>တင်ပြရန်အဆင်သင့်</h3><p>အစည်းအဝေး display သို့ မတင်ပြမီ Dashboard ကို စစ်ဆေးပါ။</p></div><div><button className="ghost" onClick={()=>setPublished(false)}>Dashboard ရှင်းရန်</button><button className="primary" onClick={()=>setPublished(true)}>Publish လုပ်ရန်</button></div></div><div className="embedded"><Dashboard published={published} onBack={open} embedded/></div></section>}
-function Dashboard({published,onBack,embedded}){
+function Dashboard({published,onBack,embedded,initialAccess=1,viewerUser,onLogout}){
   const [section,setSection]=useState(null)
   const [group,setGroup]=useState(null)
   const [file,setFile]=useState(null)
-  const [accessLevel,setAccessLevel]=useState(1)
+  const [accessLevel,setAccessLevel]=useState(initialAccess)
   const sections=[
     {id:'strategy',title:'မဟာဗျူဟာ',subtitle:'မဟာဗျူဟာနှင့် လုပ်ငန်းစဉ်များ'},
     {id:'policy',title:'မူဝါဒ',subtitle:'မူဝါဒနှင့် လုပ်ထုံးလုပ်နည်းများ'},
@@ -262,7 +274,7 @@ function Dashboard({published,onBack,embedded}){
   if(!published)return <div className="empty"><span className="eyebrow">အစိုးရရုံး</span><h1>လက်ရှိပြသမှု မရှိပါ</h1><p>အစည်းအဝေး Dashboard ကို လောလောဆယ် မပြင်ဆင်ရသေးပါ။</p>{!embedded&&<button className="ghost" onClick={onBack}>← စီမံခန့်ခွဲရေးသို့ ပြန်သွားရန်</button>}</div>
   return <div className={'dashboard exact-presentation '+(section?'detail-presentation':'')}>
     <div className="exact-header">
-      {!section&&<div className="header-actions">
+      {!section&&!embedded&&<div className="header-actions">
         <button className="admin-button" onClick={onBack}>စီမံခန့်ခွဲမှုသို့ ပြန်ရန်</button>
       </div>}
       <div>
@@ -271,13 +283,14 @@ function Dashboard({published,onBack,embedded}){
         <p>{group?'အောက်ခံအမျိုးအစား ၄ ခု':current?current.subtitle:'အုပ်ချုပ်ရေးအဖွဲ့ · စက်တင်ဘာလအစည်းအဝေး ၂၀၂၆'}</p>
       </div>
       {section&&<button className="page-back" onClick={back}>← ပင်မစာမျက်နှာ</button>}
-      <div className="access-level-switch" aria-label="အသုံးပြုသူမြင်ကွင်း စမ်းသပ်ရန်">
+      {!embedded&&<div className="access-level-switch" aria-label="အသုံးပြုသူမြင်ကွင်း စမ်းသပ်ရန်">
         <span>Security Check</span>
         <div role="group" aria-label="Access level">
           <button className={accessLevel===1?'active':''} onClick={()=>changeAccessLevel(1)}>Level 1</button>
           <button className={accessLevel===2?'active':''} onClick={()=>changeAccessLevel(2)}>Level 2</button>
         </div>
-      </div>
+      </div>}
+      {viewerUser&&<div className="viewer-session-badge"><span><b>{viewerUser.name}</b><small>{viewerUser.role==='VIP_VIEWER'?'VIP Viewer':'Normal Viewer'}</small></span><button onClick={onLogout}>Sign out</button></div>}
     </div>
     {!section&&<main className="presentation-home">
       <div className="access-note">လက်ရှိမြင်ကွင်း — <b>Level {accessLevel}</b>{accessLevel===2&&<span> · အစည်းအဝေးကို ကြည့်ရှုခွင့်မရှိပါ</span>}</div>

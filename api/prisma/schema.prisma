@@ -15,11 +15,18 @@ enum UserRole {
 
 enum AuditAction {
   USER_CREATED
+  USER_PROFILE_UPDATED
   USER_ACCESS_CHANGED
   USER_DISABLED
   USER_ENABLED
   USER_PASSWORD_RESET
   USER_PASSWORD_CHANGED
+  ACCOUNT_INVITE_CREATED
+  ACCOUNT_SETUP_LINK_REGENERATED
+  ACCOUNT_INVITE_CANCELLED
+  ACCOUNT_SETUP_COMPLETED
+  ACCOUNT_RESET_LOGIN_CREATED
+  ACCOUNT_PASSWORD_RESET_COMPLETED
   CATEGORY_CREATED
   CATEGORY_UPDATED
   CATEGORY_MOVED
@@ -100,24 +107,34 @@ enum TimeGrouping {
 }
 
 model User {
-  id                 String            @id @default(cuid())
-  email              String            @unique
+  id                 String                      @id @default(cuid())
+  email              String                      @unique
   name               String
   passwordHash       String
-  role               UserRole          @default(NORMAL_VIEWER)
-  isActive           Boolean           @default(true)
-  mustChangePassword Boolean           @default(true)
+  role               UserRole                    @default(NORMAL_VIEWER)
+  isActive           Boolean                     @default(true)
+  isPrimaryAdmin     Boolean                     @default(false)
+  loginResetRequired Boolean                     @default(false)
+  mustChangePassword Boolean                     @default(true)
   lastLoginAt        DateTime?
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
   refreshTokens      RefreshToken[]
-  categories         Category[]        @relation("CategoryCreator")
-  dataCollections    DataCollection[]  @relation("DataCollectionCreator")
-  dataRecords        DataRecord[]      @relation("DataRecordCreator")
-  documents          Document[]        @relation("DocumentCreator")
+  categories         Category[]                  @relation("CategoryCreator")
+  categoriesUpdated  Category[]                  @relation("CategoryUpdater")
+  dataCollections    DataCollection[]            @relation("DataCollectionCreator")
+  collectionsUpdated DataCollection[]            @relation("DataCollectionUpdater")
+  dataRecords        DataRecord[]                @relation("DataRecordCreator")
+  recordsUpdated     DataRecord[]                @relation("DataRecordUpdater")
+  documents          Document[]                  @relation("DocumentCreator")
+  documentsUpdated   Document[]                  @relation("DocumentUpdater")
   auditLogs          AuditLog[]
   importJobs         ImportJob[]
-  dashboardWidgets   DashboardWidget[]
+  dashboardWidgets   DashboardWidget[]           @relation("DashboardWidgetCreator")
+  widgetsUpdated     DashboardWidget[]           @relation("DashboardWidgetUpdater")
+  accountInvites     AccountInvite[]             @relation("AccountInviteCreator")
+  resetTokens        AccountPasswordResetToken[] @relation("ResetTokenUser")
+  resetTokensCreated AccountPasswordResetToken[] @relation("ResetTokenCreator")
 
   @@index([role, isActive])
 }
@@ -134,6 +151,40 @@ model RefreshToken {
   @@index([userId, expiresAt])
 }
 
+model AccountInvite {
+  id          String    @id @default(cuid())
+  email       String
+  name        String
+  role        UserRole  @default(NORMAL_VIEWER)
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdById String
+  createdBy   User      @relation("AccountInviteCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([email, acceptedAt, revokedAt, expiresAt])
+  @@index([createdById, createdAt])
+}
+
+model AccountPasswordResetToken {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  userId      String
+  user        User      @relation("ResetTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User      @relation("ResetTokenCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  expiresAt   DateTime
+  usedAt      DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, usedAt, revokedAt, expiresAt])
+  @@index([createdById, createdAt])
+}
+
 model Category {
   id              String           @id @default(cuid())
   name            String
@@ -145,6 +196,8 @@ model Category {
   archivedAt      DateTime?
   createdById     String?
   createdBy       User?            @relation("CategoryCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById     String?
+  updatedBy       User?            @relation("CategoryUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   dataRecords     DataRecord[]
@@ -167,6 +220,8 @@ model DataCollection {
   archivedAt         DateTime?
   createdById        String?
   createdBy          User?             @relation("DataCollectionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById        String?
+  updatedBy          User?             @relation("DataCollectionUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
   fields             DataField[]
@@ -215,7 +270,9 @@ model DashboardWidget {
   isActive         Boolean         @default(true)
   archivedAt       DateTime?
   createdById      String?
-  createdBy        User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy        User?           @relation("DashboardWidgetCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById      String?
+  updatedBy        User?           @relation("DashboardWidgetUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
@@ -237,6 +294,8 @@ model DataRecord {
   sourceImport     ImportJob?     @relation(fields: [sourceImportId], references: [id], onDelete: SetNull)
   createdById      String?
   createdBy        User?          @relation("DataRecordCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById      String?
+  updatedBy        User?          @relation("DataRecordUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
   archivedAt       DateTime?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
@@ -288,6 +347,8 @@ model Document {
   category    Category    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   createdById String?
   createdBy   User?       @relation("DocumentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String?
+  updatedBy   User?       @relation("DocumentUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
   archivedAt  DateTime?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt

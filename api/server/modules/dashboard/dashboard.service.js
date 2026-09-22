@@ -4,7 +4,7 @@ import { createAuditService } from '../../lib/audit.js'
 import { DomainError, notFound } from '../../lib/errors.js'
 import { validateRecordPayload } from '../data/data.validation.js'
 
-const includeDefinition = { dataCollection: true, dimensionField: true, measureField: true }
+const includeDefinition = { dataCollection: true, dimensionField: true, measureField: true, createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } }
 
 export function validateWidgetConfiguration(input, fields) {
   const byId = new Map(fields.map(field => [field.id, field]))
@@ -82,7 +82,7 @@ export function createDashboardService(prisma) {
     async create(input, actorId) {
       const { savedFilters } = validateWidgetConfiguration(input, await fieldsForCollection(input.dataCollectionId))
       return prisma.$transaction(async tx => {
-        const created = await tx.dashboardWidget.create({ data: { ...input, savedFilters, createdById: actorId }, include: includeDefinition })
+        const created = await tx.dashboardWidget.create({ data: { ...input, savedFilters, createdById: actorId, updatedById: actorId }, include: includeDefinition })
         await createAuditService(tx).record({ actorId, action: 'DASHBOARD_WIDGET_CREATED', entityType: 'DashboardWidget', entityId: created.id, after: created })
         return created
       })
@@ -93,7 +93,7 @@ export function createDashboardService(prisma) {
       const { savedFilters } = validateWidgetConfiguration(proposed, await fieldsForCollection(proposed.dataCollectionId))
       return prisma.$transaction(async tx => {
         const data = Object.hasOwn(input, 'savedFilters') ? { ...input, savedFilters } : input
-        const after = await tx.dashboardWidget.update({ where: { id }, data, include: includeDefinition })
+        const after = await tx.dashboardWidget.update({ where: { id }, data: { ...data, updatedById: actorId }, include: includeDefinition })
         await createAuditService(tx).record({ actorId, action: 'DASHBOARD_WIDGET_UPDATED', entityType: 'DashboardWidget', entityId: id, before, after })
         return after
       })
@@ -101,7 +101,7 @@ export function createDashboardService(prisma) {
     async archive(id, actorId) {
       const before = await widget(id, true)
       return prisma.$transaction(async tx => {
-        const after = await tx.dashboardWidget.update({ where: { id }, data: { archivedAt: new Date(), isActive: false }, include: includeDefinition })
+        const after = await tx.dashboardWidget.update({ where: { id }, data: { archivedAt: new Date(), isActive: false, updatedById: actorId }, include: includeDefinition })
         await createAuditService(tx).record({ actorId, action: 'DASHBOARD_WIDGET_ARCHIVED', entityType: 'DashboardWidget', entityId: id, before, after })
         return after
       })

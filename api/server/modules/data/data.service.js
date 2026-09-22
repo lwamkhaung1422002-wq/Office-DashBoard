@@ -7,6 +7,7 @@ import { validateRecordPayload } from './data.validation.js'
 const collectionInclude = {
   fields: { orderBy: { position: 'asc' } },
   createdBy: { select: { name: true } },
+  updatedBy: { select: { name: true } },
   _count: { select: { records: { where: { archivedAt: null } } } },
 }
 
@@ -37,7 +38,7 @@ export function createDataService(prisma) {
   }
 
   async function recordForUser(id, role, includeArchived = false) {
-    const record = await prisma.dataRecord.findFirst({ where: { id, ...accessWhere(role), ...(includeArchived ? {} : { archivedAt: null }) }, include: { dataCollection: { include: collectionInclude } } })
+    const record = await prisma.dataRecord.findFirst({ where: { id, ...accessWhere(role), ...(includeArchived ? {} : { archivedAt: null }) }, include: { dataCollection: { include: collectionInclude }, createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } } })
     if (!record) throw notFound('Data record')
     return record
   }
@@ -47,12 +48,12 @@ export function createDataService(prisma) {
       const category = await prisma.category.findFirst({ where: { id: input.categoryId, archivedAt: null }, select: { id: true } })
       if (!category) throw new DomainError(422, 'INVALID_CATEGORY', 'The selected category is unavailable')
       return prisma.$transaction(async tx => {
-        const created = await tx.dataCollection.create({ data: { categoryId: input.categoryId, name: input.name, description: input.description, defaultAccessLevel: input.defaultAccessLevel, createdById: actorId } })
+        const created = await tx.dataCollection.create({ data: { categoryId: input.categoryId, name: input.name, description: input.description, defaultAccessLevel: input.defaultAccessLevel, createdById: actorId, updatedById: actorId } })
         await tx.dataField.createMany({ data: input.fields.map((field, position) => ({ ...field, position, dataCollectionId: created.id })) })
         return tx.dataCollection.findUnique({ where: { id: created.id }, include: collectionInclude })
       })
     },
-    async updateCollection(id, input, _actorId) {
+    async updateCollection(id, input, actorId) {
       const before = await collection(id)
       const previousCategoryId = before.categoryId
       const categoryId = input.categoryId || before.categoryId
@@ -66,10 +67,10 @@ export function createDataService(prisma) {
       })
       if (duplicate) throw new DomainError(409, 'DUPLICATE_DATA_COLLECTION', 'A structured data item with this name already exists in the selected folder')
       return prisma.$transaction(async tx => {
-        const updated = await tx.dataCollection.update({ where: { id }, data: input, include: collectionInclude })
+        const updated = await tx.dataCollection.update({ where: { id }, data: { ...input, updatedById: actorId }, include: collectionInclude })
         if (input.categoryId && input.categoryId !== previousCategoryId) {
           await Promise.all([
-            tx.dataRecord.updateMany({ where: { dataCollectionId: id }, data: { categoryId: input.categoryId } }),
+            tx.dataRecord.updateMany({ where: { dataCollectionId: id }, data: { categoryId: input.categoryId, updatedById: actorId } }),
             tx.importJob.updateMany({ where: { dataCollectionId: id }, data: { categoryId: input.categoryId } }),
           ])
         }
@@ -90,8 +91,8 @@ export function createDataService(prisma) {
       if (before.archivedAt) return before
       const archivedAt = new Date()
       return prisma.$transaction(async tx => {
-        const after = await tx.dataCollection.update({ where: { id }, data: { archivedAt }, include: collectionInclude })
-        await tx.dataRecord.updateMany({ where: { dataCollectionId: id, archivedAt: null }, data: { archivedAt } })
+        const after = await tx.dataCollection.update({ where: { id }, data: { archivedAt, updatedById: actorId }, include: collectionInclude })
+        await tx.dataRecord.updateMany({ where: { dataCollectionId: id, archivedAt: null }, data: { archivedAt, updatedById: actorId } })
         await createAuditService(tx).record({ actorId, action: 'DATA_COLLECTION_ARCHIVED', entityType: 'DataCollection', entityId: id, before, after })
         return after
       })
@@ -103,8 +104,8 @@ export function createDataService(prisma) {
       if (before.category.archivedAt) throw new DomainError(409, 'ARCHIVED_CATEGORY', 'Restore the containing folder before restoring this structured data')
       const deletedAt = before.archivedAt
       return prisma.$transaction(async tx => {
-        const after = await tx.dataCollection.update({ where: { id }, data: { archivedAt: null }, include: collectionInclude })
-        await tx.dataRecord.updateMany({ where: { dataCollectionId: id, archivedAt: deletedAt }, data: { archivedAt: null } })
+        const after = await tx.dataCollection.update({ where: { id }, data: { archivedAt: null, updatedById: actorId }, include: collectionInclude })
+        await tx.dataRecord.updateMany({ where: { dataCollectionId: id, archivedAt: deletedAt }, data: { archivedAt: null, updatedById: actorId } })
         await createAuditService(tx).record({ actorId, action: 'DATA_COLLECTION_RESTORED', entityType: 'DataCollection', entityId: id, before, after })
         return after
       })
@@ -132,7 +133,7 @@ export function createDataService(prisma) {
         : [{ [query.sortBy]: query.sortDirection }, { id: query.sortDirection }]
       const records = await prisma.dataRecord.findMany({
         where,
-        include: { dataCollection: { select: { id: true, name: true } }, category: { select: { id: true, name: true } } },
+        include: { dataCollection: { select: { id: true, name: true } }, category: { select: { id: true, name: true } }, createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } },
         orderBy,
         take: take + 1,
         cursor: decodeCursor(query.cursor),
@@ -150,7 +151,7 @@ export function createDataService(prisma) {
       if (definition.categoryId !== input.categoryId) throw new DomainError(422, 'COLLECTION_CATEGORY_MISMATCH', 'The data collection does not belong to the selected category')
       const payload = validateRecordPayload(definition.fields, input.payload)
       return prisma.$transaction(async tx => {
-        const created = await tx.dataRecord.create({ data: { title: input.title, payload, categoryId: input.categoryId, dataCollectionId: input.dataCollectionId, accessLevel: input.accessLevel || definition.defaultAccessLevel, sourceType: 'MANUAL', sourceImportId: null, createdById: actorId } })
+        const created = await tx.dataRecord.create({ data: { title: input.title, payload, categoryId: input.categoryId, dataCollectionId: input.dataCollectionId, accessLevel: input.accessLevel || definition.defaultAccessLevel, sourceType: 'MANUAL', sourceImportId: null, createdById: actorId, updatedById: actorId } })
         await createAuditService(tx).record({ actorId, action: 'DATA_CREATED', entityType: 'DataRecord', entityId: created.id, after: created })
         return created
       })
@@ -160,7 +161,7 @@ export function createDataService(prisma) {
       const merged = input.payload ? { ...before.payload, ...input.payload } : before.payload
       const payload = validateRecordPayload(before.dataCollection.fields, merged)
       return prisma.$transaction(async tx => {
-        const after = await tx.dataRecord.update({ where: { id }, data: { ...input, payload } })
+        const after = await tx.dataRecord.update({ where: { id }, data: { ...input, payload, updatedById: actorId } })
         await createAuditService(tx).record({ actorId, action: 'DATA_UPDATED', entityType: 'DataRecord', entityId: id, before, after })
         return after
       })
@@ -169,7 +170,7 @@ export function createDataService(prisma) {
       const before = await recordForUser(id, 'ADMIN', true)
       if (before.archivedAt) return before
       return prisma.$transaction(async tx => {
-        const after = await tx.dataRecord.update({ where: { id }, data: { archivedAt: new Date() } })
+        const after = await tx.dataRecord.update({ where: { id }, data: { archivedAt: new Date(), updatedById: actorId } })
         await createAuditService(tx).record({ actorId, action: 'DATA_ARCHIVED', entityType: 'DataRecord', entityId: id, before, after })
         return after
       })
@@ -178,7 +179,7 @@ export function createDataService(prisma) {
       const before = await recordForUser(id, 'ADMIN', true)
       if (!before.archivedAt) return before
       return prisma.$transaction(async tx => {
-        const after = await tx.dataRecord.update({ where: { id }, data: { archivedAt: null } })
+        const after = await tx.dataRecord.update({ where: { id }, data: { archivedAt: null, updatedById: actorId } })
         await createAuditService(tx).record({ actorId, action: 'DATA_RESTORED', entityType: 'DataRecord', entityId: id, before, after })
         return after
       })

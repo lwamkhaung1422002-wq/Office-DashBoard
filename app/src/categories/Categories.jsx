@@ -82,10 +82,10 @@ function MoveDialog({ items, tree, onClose, onConfirm, busy, error }) {
 
 function DetailsDialog({ item, location, onClose }) {
   const rows = item.itemType === 'FOLDER'
-    ? [['Type', 'Folder'], ['Location', location], ['Items', item.sizeLabel], ['Created', formatDate(item.createdAt)], ['Modified', formatDate(item.updatedAt)]]
+    ? [['Type', 'Folder'], ['Location', location], ['Items', item.sizeLabel], ['Created', formatDate(item.createdAt)], ['Created By', item.createdBy?.name || '—'], ['Modified', formatDate(item.updatedAt)], ['Modified By', item.updatedBy?.name || item.createdBy?.name || '—']]
     : item.itemType === 'DATA'
-      ? [['Type', 'Structured Data'], ['Location', location], ['Records', item.sizeLabel], ['Fields', `${item.fields?.length || 0}`], ['Access', item.defaultAccessLevel], ['Modified', formatDate(item.updatedAt)]]
-      : [['Type', item.typeLabel], ['File name', item.fileName], ['Location', location], ['Size', item.sizeLabel], ['Access', item.accessLevel], ['Uploaded', formatDate(item.createdAt)], ['Modified', formatDate(item.updatedAt)]]
+      ? [['Type', 'Structured Data'], ['Location', location], ['Records', item.sizeLabel], ['Fields', `${item.fields?.length || 0}`], ['Access', item.defaultAccessLevel], ['Created By', item.createdBy?.name || '—'], ['Modified', formatDate(item.updatedAt)], ['Modified By', item.updatedBy?.name || item.createdBy?.name || '—']]
+      : [['Type', item.typeLabel], ['File name', item.fileName], ['Location', location], ['Size', item.sizeLabel], ['Access', item.accessLevel], ['Uploaded', formatDate(item.createdAt)], ['Created By', item.createdBy?.name || '—'], ['Modified', formatDate(item.updatedAt)], ['Modified By', item.updatedBy?.name || item.createdBy?.name || '—']]
   return <div className="fm-dialog-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
     <section className="fm-dialog fm-details-dialog" role="dialog" aria-modal="true" aria-labelledby="details-dialog-title">
       <header><div><small>Details</small><h2 id="details-dialog-title">{item.name}</h2></div><button onClick={onClose} aria-label="ပိတ်ရန်"><CloseRounded /></button></header>

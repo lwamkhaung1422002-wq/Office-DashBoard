@@ -2,9 +2,10 @@ import bcrypt from 'bcryptjs'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createAuthService } from '../server/modules/auth/auth.service.js'
 import { createUserService } from '../server/modules/users/user.service.js'
+import { hashAccountToken } from '../server/modules/users/account-tokens.js'
 
 function memoryDatabase() {
-  const state = { users: [], tokens: [], audits: [] }
+  const state = { users: [], tokens: [], audits: [], invites: [] }
   let sequence = 0
   const db = {
     state,
@@ -31,6 +32,15 @@ function memoryDatabase() {
       update: async ({ where, data }) => Object.assign(state.tokens.find(item => item.id === where.id), data),
       updateMany: async ({ where, data }) => { state.tokens.filter(item => item.userId === where.userId && !item.revokedAt).forEach(item => Object.assign(item, data)) },
     },
+    accountInvite: {
+      updateMany: async () => ({ count: 0 }),
+      findFirst: async ({ where }) => state.invites.find(invite => invite.email === where.email && !invite.acceptedAt && !invite.revokedAt && invite.expiresAt > new Date()) || null,
+      create: async ({ data }) => {
+        const invite = { id: `invite-${state.invites.length + 1}`, acceptedAt: null, revokedAt: null, createdAt: new Date(), updatedAt: new Date(), ...data }
+        state.invites.push(invite)
+        return invite
+      },
+    },
     auditLog: { create: async ({ data }) => { state.audits.push(data); return data } },
     $transaction: callback => callback(db),
   }
@@ -40,14 +50,14 @@ function memoryDatabase() {
 describe('authentication and user access', () => {
   beforeEach(() => { process.env.JWT_SECRET = 'test-secret-value-with-at-least-32-characters' })
 
-  it('creates a viewer with a one-time temporary password and audit event', async () => {
+  it('creates a viewer invitation with a hashed one-time setup token', async () => {
     const db = memoryDatabase()
-    const result = await createUserService(db).create({ email: 'viewer@example.test', name: 'Viewer', role: 'VIP_VIEWER' }, 'admin-1')
-    expect(result.temporaryPassword.length).toBeGreaterThanOrEqual(15)
-    expect(result.user).not.toHaveProperty('passwordHash')
-    expect(db.state.users[0].passwordHash).not.toBe(result.temporaryPassword)
-    expect(await bcrypt.compare(result.temporaryPassword, db.state.users[0].passwordHash)).toBe(true)
-    expect(db.state.audits[0].action).toBe('USER_CREATED')
+    const result = await createUserService(db).invite({ email: 'viewer@example.test', name: 'Viewer', role: 'VIP_VIEWER' }, 'admin-1')
+    const rawToken = new URL(result.setupUrl).searchParams.get('token')
+    expect(db.state.users).toHaveLength(0)
+    expect(db.state.invites[0].tokenHash).toBe(hashAccountToken(rawToken))
+    expect(db.state.invites[0].tokenHash).not.toBe(rawToken)
+    expect(db.state.audits[0].action).toBe('ACCOUNT_INVITE_CREATED')
   })
 
   it('logs in active Normal/VIP users and refuses disabled accounts', async () => {

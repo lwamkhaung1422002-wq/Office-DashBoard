@@ -2,9 +2,9 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { requireAuth } from '../../middleware/auth.js'
 import { createAuthService } from './auth.service.js'
+import { clearRefreshCookie, readRefreshCookie, setRefreshCookie } from './refresh-cookie.js'
 
 const credentialsSchema = z.object({ email: z.string().trim().email().max(254), password: z.string().min(8).max(128) })
-const refreshSchema = z.object({ refreshToken: z.string().min(32).max(512) })
 const passwordSchema = z.object({ currentPassword: z.string().min(8).max(128), newPassword: z.string().min(12).max(128) })
 
 export function authRoutes(prisma) {
@@ -13,12 +13,24 @@ export function authRoutes(prisma) {
   router.post('/login', async (req, res) => {
     const credentials = credentialsSchema.parse(req.body)
     const data = await service.login(credentials)
-    res.json({ data: { ...data, token: data.accessToken } })
+    setRefreshCookie(res, data.refreshToken)
+    res.json({ data: { accessToken: data.accessToken, token: data.accessToken, user: data.user } })
   })
-  router.post('/refresh', async (req, res) => res.json({ data: await service.refresh(refreshSchema.parse(req.body).refreshToken) }))
+  router.post('/refresh', async (req, res) => {
+    const rawToken = readRefreshCookie(req)
+    if (!rawToken) return res.status(401).json({ error: { code: 'REFRESH_REQUIRED', message: 'A refresh session is required' } })
+    try {
+      const data = await service.refresh(rawToken)
+      setRefreshCookie(res, data.refreshToken)
+      res.json({ data: { accessToken: data.accessToken, token: data.accessToken, user: data.user } })
+    } catch (error) {
+      clearRefreshCookie(res)
+      throw error
+    }
+  })
   router.post('/logout', async (req, res) => {
-    const parsed = refreshSchema.partial().parse(req.body || {})
-    await service.logout(parsed.refreshToken)
+    await service.logout(readRefreshCookie(req))
+    clearRefreshCookie(res)
     res.status(204).end()
   })
   router.get('/me', requireAuth(prisma), (req, res) => res.json({ data: req.user }))

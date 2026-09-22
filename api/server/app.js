@@ -12,7 +12,7 @@ import { authRoutes } from './modules/auth/auth.routes.js'
 import { categoryRoutes } from './modules/categories/category.routes.js'
 import { documentRoutes } from './modules/documents/document.routes.js'
 import { dataRoutes } from './modules/data/data.routes.js'
-import { userRoutes } from './modules/users/user.routes.js'
+import { accountLinkRoutes, userRoutes } from './modules/users/user.routes.js'
 import { importRoutes } from './modules/imports/import.routes.js'
 import { createStorage } from './lib/storage.js'
 import { adminDashboardRoutes, viewerDashboardRoutes } from './modules/dashboard/dashboard.routes.js'
@@ -24,7 +24,7 @@ export function createApp(prisma = defaultPrisma, storage = createStorage()) {
   const app = express()
   app.disable('x-powered-by')
   app.use(helmet())
-  app.use(cors({ origin: allowedOrigins(), credentials: false }))
+  app.use(cors({ origin: allowedOrigins(), credentials: true }))
   app.use(compression())
   app.use(pinoHttp({ logger, enabled: process.env.NODE_ENV !== 'test' }))
   app.use('/api', rateLimit({
@@ -45,6 +45,7 @@ export function createApp(prisma = defaultPrisma, storage = createStorage()) {
     }
   })
   app.use('/api/auth', authRoutes(prisma))
+  app.use('/api/auth', accountLinkRoutes(prisma))
   app.use('/api', requireAuth(prisma))
   app.use('/api', requirePasswordChanged)
   app.use('/api/admin', requireRoles('ADMIN'))

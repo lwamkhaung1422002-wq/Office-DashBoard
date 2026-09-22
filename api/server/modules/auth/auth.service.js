@@ -9,6 +9,9 @@ const publicUser = user => ({
   email: user.email,
   name: user.name,
   role: user.role,
+  isActive: user.isActive,
+  isPrimaryAdmin: user.isPrimaryAdmin,
+  loginResetRequired: user.loginResetRequired,
   mustChangePassword: user.mustChangePassword,
   lastLoginAt: user.lastLoginAt,
 })
@@ -47,6 +50,7 @@ export function createAuthService(prisma) {
       if (!user || !user.isActive || !await bcrypt.compare(password, user.passwordHash)) {
         throw new DomainError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect')
       }
+      if (user.loginResetRequired) throw new DomainError(403, 'LOGIN_RESET_REQUIRED', 'Use the secure reset link before signing in again')
       const updated = await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } })
       return { accessToken: accessToken(updated), refreshToken: await refreshToken(prisma, user.id), user: publicUser(updated) }
     },
@@ -56,11 +60,12 @@ export function createAuthService(prisma) {
         where: { tokenHash: tokenHash(rawToken) },
         include: { user: true },
       })
-      if (!session || session.revokedAt || session.expiresAt <= new Date() || !session.user.isActive) {
+      if (!session || session.revokedAt || session.expiresAt <= new Date() || !session.user.isActive || session.user.loginResetRequired) {
         throw new DomainError(401, 'INVALID_REFRESH_TOKEN', 'The refresh token is invalid or expired')
       }
       return prisma.$transaction(async tx => {
-        await tx.refreshToken.update({ where: { id: session.id }, data: { revokedAt: new Date() } })
+        const revoked = await tx.refreshToken.updateMany({ where: { id: session.id, revokedAt: null }, data: { revokedAt: new Date() } })
+        if (revoked.count !== 1) throw new DomainError(401, 'REFRESH_TOKEN_REUSED', 'The refresh session has already been used')
         const nextRefresh = await refreshToken(tx, session.userId)
         return { accessToken: accessToken(session.user), refreshToken: nextRefresh, user: publicUser(session.user) }
       })

@@ -11,9 +11,10 @@ export function requireAuth(prisma) {
       const secret = process.env.JWT_SECRET
       if (!secret) throw new Error('JWT_SECRET is not configured')
       const payload = jwt.verify(token, secret, { algorithms: ['HS256'] })
-      const user = await prisma.user.findUnique({ where: { id: payload.sub }, select: { id: true, email: true, role: true, name: true, isActive: true, mustChangePassword: true } })
+      const user = await prisma.user.findUnique({ where: { id: payload.sub }, select: { id: true, email: true, role: true, name: true, isActive: true, isPrimaryAdmin: true, loginResetRequired: true, mustChangePassword: true } })
       if (!user?.isActive) return next(new DomainError(401, 'ACCOUNT_INACTIVE', 'The account is unavailable'))
-      req.user = { id: user.id, email: user.email, role: user.role, name: user.name, mustChangePassword: user.mustChangePassword }
+      if (user.loginResetRequired) return next(new DomainError(401, 'LOGIN_RESET_REQUIRED', 'Use the secure reset link before signing in again'))
+      req.user = { id: user.id, email: user.email, role: user.role, name: user.name, isPrimaryAdmin: user.isPrimaryAdmin, mustChangePassword: user.mustChangePassword }
       next()
     } catch (error) {
       if (error instanceof DomainError) return next(error)
