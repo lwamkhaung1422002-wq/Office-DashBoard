@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs'
 import { createAuditService } from '../../lib/audit.js'
 import { DomainError, notFound } from '../../lib/errors.js'
 import { makeStorageKey } from '../../lib/storage.js'
-import { stableFieldKey, validateRecordPayload } from '../data/data.validation.js'
+import { isUnambiguousDateValue, stableFieldKey, validateRecordPayload } from '../data/data.validation.js'
 
 function cellValue(cell) {
   const value = cell?.value
@@ -19,7 +19,7 @@ function inferType(values) {
   if (!nonEmpty.length) return 'TEXT'
   if (nonEmpty.every(value => typeof value === 'boolean')) return 'BOOLEAN'
   if (nonEmpty.every(value => typeof value === 'number' && Number.isFinite(value))) return 'NUMBER'
-  if (nonEmpty.every(value => value instanceof Date && !Number.isNaN(value.valueOf()))) return 'DATE'
+  if (nonEmpty.every(isUnambiguousDateValue)) return 'DATE'
   return 'TEXT'
 }
 

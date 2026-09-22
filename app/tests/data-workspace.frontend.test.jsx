@@ -125,6 +125,14 @@ describe('Data workspace frontend', () => {
     expect(dashboard).not.toContain('Add New')
   })
 
+  it('switches Table to Dashboard through the existing toolbar control', () => {
+    const setViewMode = vi.fn()
+    const toolbar = DataRecordToolbar({ viewMode: 'table', setViewMode, search: '', setSearch: vi.fn(), sort: { sortBy: 'updatedAt', sortDirection: 'desc' }, setSort: vi.fn(), customize: false, setCustomize: vi.fn(), onAddRecord: vi.fn(), onAddWidget: vi.fn() })
+    const viewSwitch = toolbar.props.children[0].props.children[1]
+    viewSwitch.props.children[1].props.onClick()
+    expect(setViewMode).toHaveBeenCalledWith('dashboard')
+  })
+
   it('renders the dashboard empty state and configured KPI, Pie, Bar, and Line widgets', () => {
     const empty = renderToStaticMarkup(<DataDashboard loading={false} error="" items={[]} customize={false} onAdd={() => {}} onEdit={() => {}} onRemove={() => {}} onMove={() => {}} />)
     expect(empty).toContain('Dashboard not set up yet')
@@ -135,6 +143,8 @@ describe('Data workspace frontend', () => {
     expect(configured).toContain('Move up')
     expect(configured).toContain('Remove')
     expect(renderToStaticMarkup(<WidgetVisualization widget={items[1].widget} data={items[1].data} />)).toContain('data-pie')
+    const failed = renderToStaticMarkup(<DataDashboard loading={false} error="Dashboard request failed" items={[]} customize={false} onAdd={() => {}} onEdit={() => {}} onRemove={() => {}} onMove={() => {}} />)
+    expect(failed).toContain('Dashboard request failed')
   })
 
   it('builds smart widget fields, previews unsaved widgets, and scopes loading to one collection', async () => {

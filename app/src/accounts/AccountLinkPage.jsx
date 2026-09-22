@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 import './accounts-access.css'
 
-const roleLabels = { ADMIN: 'Admin', VIP_VIEWER: 'VIP Viewer', NORMAL_VIEWER: 'Normal Viewer' }
+const roleLabels = { ADMIN: 'Admin', VIP_VIEWER: 'VIP', NORMAL_VIEWER: 'Normal' }
 
 export default function AccountLinkPage({ mode }) {
-  const token = new URLSearchParams(window.location.search).get('token') || ''
+  const [token] = useState(() => new URLSearchParams(window.location.search).get('token') || '')
   const [details, setDetails] = useState(null)
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -13,7 +13,10 @@ export default function AccountLinkPage({ mode }) {
   const endpoint = mode === 'setup' ? '/auth/account/setup' : '/auth/account/reset'
 
   useEffect(() => {
-    api(`${endpoint}?token=${encodeURIComponent(token)}`)
+    const cleanUrl = new URL(window.location.href)
+    cleanUrl.searchParams.delete('token')
+    window.history.replaceState(window.history.state, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`)
+    api(`${endpoint}/validate`, { method: 'POST', body: JSON.stringify({ token }) })
       .then(data => { setDetails(data); setState({ loading: false, error: '', complete: false }) })
       .catch(error => setState({ loading: false, error: error.message, complete: false }))
   }, [endpoint, token])

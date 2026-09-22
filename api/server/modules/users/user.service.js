@@ -27,6 +27,7 @@ const selectPublic = {
 const conflict = (code, message) => new DomainError(409, code, message)
 const forbidden = message => new DomainError(403, 'PRIMARY_ADMIN_PROTECTED', message)
 const normalizeEmail = email => email.trim().toLowerCase()
+const isUniqueConstraintError = error => error?.code === 'P2002'
 
 function assertMutableAccount(user, input = {}) {
   if (!user.isPrimaryAdmin) return
@@ -97,16 +98,22 @@ export function createUserService(prisma) {
       const now = new Date()
       const { rawToken, tokenHash } = createAccountToken()
       const expiresAt = inviteExpiresAt()
-      const invitation = await prisma.$transaction(async tx => {
-        const existing = await tx.user.findUnique({ where: { email }, select: { id: true, isActive: true } })
-        if (existing) throw conflict('ACCOUNT_ALREADY_EXISTS', existing.isActive ? 'An account already exists for this email' : 'This account is disabled; enable it instead')
-        await tx.accountInvite.updateMany({ where: { email, acceptedAt: null, revokedAt: null, expiresAt: { lte: now } }, data: { revokedAt: now } })
-        const pending = await tx.accountInvite.findFirst({ where: { email, acceptedAt: null, revokedAt: null, expiresAt: { gt: now } }, select: { id: true } })
-        if (pending) throw conflict('INVITATION_ALREADY_PENDING', 'A valid setup invitation already exists for this email')
-        const created = await tx.accountInvite.create({ data: { email, name: input.name, role: input.role, tokenHash, expiresAt, createdById: actorId } })
-        await createAuditService(tx).record({ actorId, action: 'ACCOUNT_INVITE_CREATED', entityType: 'AccountInvite', entityId: created.id, after: { email, name: input.name, role: input.role, expiresAt } })
-        return created
-      })
+      let invitation
+      try {
+        invitation = await prisma.$transaction(async tx => {
+          const existing = await tx.user.findUnique({ where: { email }, select: { id: true, isActive: true } })
+          if (existing) throw conflict('ACCOUNT_ALREADY_EXISTS', existing.isActive ? 'An account already exists for this email' : 'This account is disabled; enable it instead')
+          await tx.accountInvite.updateMany({ where: { email, acceptedAt: null, revokedAt: null, expiresAt: { lte: now } }, data: { revokedAt: now } })
+          const pending = await tx.accountInvite.findFirst({ where: { email, acceptedAt: null, revokedAt: null, expiresAt: { gt: now } }, select: { id: true } })
+          if (pending) throw conflict('INVITATION_ALREADY_PENDING', 'A valid setup invitation already exists for this email')
+          const created = await tx.accountInvite.create({ data: { email, name: input.name, role: input.role, tokenHash, expiresAt, createdById: actorId } })
+          await createAuditService(tx).record({ actorId, action: 'ACCOUNT_INVITE_CREATED', entityType: 'AccountInvite', entityId: created.id, after: { email, name: input.name, role: input.role, expiresAt } })
+          return created
+        })
+      } catch (error) {
+        if (isUniqueConstraintError(error)) throw conflict('INVITATION_ALREADY_PENDING', 'A valid setup invitation already exists for this email')
+        throw error
+      }
       return { invitation: publicInvite(invitation), setupUrl: setupUrl(rawToken) }
     },
 
@@ -167,15 +174,21 @@ export function createUserService(prisma) {
       if (!user.isActive) throw conflict('ACCOUNT_DISABLED', 'Enable this account before resetting its login')
       const { rawToken, tokenHash } = createAccountToken()
       const expiresAt = resetExpiresAt()
-      const token = await prisma.$transaction(async tx => {
-        const now = new Date()
-        await tx.user.update({ where: { id }, data: { loginResetRequired: true } })
-        await tx.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: now } })
-        await tx.accountPasswordResetToken.updateMany({ where: { userId: id, usedAt: null, revokedAt: null }, data: { revokedAt: now } })
-        const created = await tx.accountPasswordResetToken.create({ data: { userId: id, createdById: actorId, tokenHash, expiresAt } })
-        await createAuditService(tx).record({ actorId, action: 'ACCOUNT_RESET_LOGIN_CREATED', entityType: 'User', entityId: id, metadata: { tokenId: created.id, expiresAt } })
-        return created
-      })
+      let token
+      try {
+        token = await prisma.$transaction(async tx => {
+          const now = new Date()
+          await tx.user.update({ where: { id }, data: { loginResetRequired: true } })
+          await tx.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: now } })
+          await tx.accountPasswordResetToken.updateMany({ where: { userId: id, usedAt: null, revokedAt: null }, data: { revokedAt: now } })
+          const created = await tx.accountPasswordResetToken.create({ data: { userId: id, createdById: actorId, tokenHash, expiresAt } })
+          await createAuditService(tx).record({ actorId, action: 'ACCOUNT_RESET_LOGIN_CREATED', entityType: 'User', entityId: id, metadata: { tokenId: created.id, expiresAt } })
+          return created
+        })
+      } catch (error) {
+        if (isUniqueConstraintError(error)) throw conflict('RESET_ALREADY_IN_PROGRESS', 'A login reset is already in progress; try again')
+        throw error
+      }
       return { id: token.id, expiresAt, resetUrl: resetUrl(rawToken) }
     },
 

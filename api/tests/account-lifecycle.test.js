@@ -82,6 +82,19 @@ function memoryDatabase() {
 }
 
 describe('account invitation and reset lifecycle', () => {
+  it('maps database uniqueness races to clean conflict responses', async () => {
+    const inviteDb = memoryDatabase()
+    inviteDb.accountInvite.create = async () => { throw Object.assign(new Error('unique'), { code: 'P2002' }) }
+    await expect(createUserService(inviteDb).invite({ email: 'race@example.test', name: 'Race', role: 'NORMAL_VIEWER' }, 'admin-1'))
+      .rejects.toMatchObject({ status: 409, code: 'INVITATION_ALREADY_PENDING' })
+
+    const resetDb = memoryDatabase()
+    resetDb.state.users.push({ id: 'viewer', email: 'viewer@example.test', name: 'Viewer', role: 'NORMAL_VIEWER', isActive: true, isPrimaryAdmin: false })
+    resetDb.accountPasswordResetToken.create = async () => { throw Object.assign(new Error('unique'), { code: 'P2002' }) }
+    await expect(createUserService(resetDb).resetLogin('viewer', 'admin-1'))
+      .rejects.toMatchObject({ status: 409, code: 'RESET_ALREADY_IN_PROGRESS' })
+  })
+
   it('rejects duplicate active accounts and duplicate pending invitations', async () => {
     const activeDb = memoryDatabase()
     activeDb.state.users.push({ id: 'viewer', email: 'viewer@example.test', name: 'Viewer', role: 'NORMAL_VIEWER', isActive: true })

@@ -31,4 +31,20 @@ describe('Excel inspection', () => {
     const worksheet = sheet([['Department', 'Department'], ['A', 'B']])
     expect(() => inspectSheet(worksheet)).toThrowError(expect.objectContaining({ code: 'DUPLICATE_HEADERS' }))
   })
+
+  it('recognizes and normalizes day-first date strings used by Excel exports', () => {
+    const worksheet = sheet([
+      ['Name', 'Amount', 'Date'],
+      ['Alpha', 10.5, '15/10/2017'],
+      ['Beta', 20, '16/08/2016'],
+    ])
+    const result = inspectSheet(worksheet)
+    expect(result.fields.map(field => [field.key, field.type])).toEqual([
+      ['name', 'TEXT'], ['amount', 'NUMBER'], ['date', 'DATE'],
+    ])
+    expect(result.rows.map(row => row.data)).toEqual([
+      { name: 'Alpha', amount: 10.5, date: '2017-10-15T00:00:00.000Z' },
+      { name: 'Beta', amount: 20, date: '2016-08-16T00:00:00.000Z' },
+    ])
+  })
 })

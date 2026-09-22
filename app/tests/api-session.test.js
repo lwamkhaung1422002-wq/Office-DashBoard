@@ -45,4 +45,39 @@ describe('refresh-cookie client session', () => {
     await logout()
     expect(getToken()).toBeNull()
   })
+
+  it('immediately notifies the app when refresh fails for an authenticated request', async () => {
+    sessionStorage.setItem('office_access_token', 'expired-token')
+    sessionStorage.setItem('office_user', JSON.stringify({ id: 'u1', role: 'ADMIN' }))
+    vi.stubGlobal('fetch', vi.fn(async url => {
+      const message = String(url).endsWith('/auth/refresh') ? 'refresh expired' : 'access expired'
+      return new Response(JSON.stringify({ error: { message } }), { status: 401, headers: { 'Content-Type': 'application/json' } })
+    }))
+    const { api, subscribeSessionExpired } = await import('../src/api.js')
+    const expired = vi.fn()
+    const unsubscribe = subscribeSessionExpired(expired)
+    await expect(api('/admin/users')).rejects.toThrow('refresh expired')
+    expect(expired).toHaveBeenCalledOnce()
+    expect(sessionStorage.getItem('office_access_token')).toBeNull()
+    expect(sessionStorage.getItem('office_user')).toBeNull()
+    unsubscribe()
+  })
+
+  it('returns a clean Login bootstrap without a misleading session-expired event', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { message: 'no session' } }), { status: 401, headers: { 'Content-Type': 'application/json' } })))
+    const { bootstrapSession, subscribeSessionExpired } = await import('../src/api.js')
+    const expired = vi.fn()
+    subscribeSessionExpired(expired)
+    await expect(bootstrapSession()).resolves.toBeNull()
+    expect(expired).not.toHaveBeenCalled()
+  })
+
+  it('does not emit session-expired for an ordinary failed login', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { message: 'incorrect' } }), { status: 401, headers: { 'Content-Type': 'application/json' } })))
+    const { login, subscribeSessionExpired } = await import('../src/api.js')
+    const expired = vi.fn()
+    subscribeSessionExpired(expired)
+    await expect(login('viewer@example.test', 'wrong-password')).rejects.toThrow('incorrect')
+    expect(expired).not.toHaveBeenCalled()
+  })
 })

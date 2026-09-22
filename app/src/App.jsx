@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Login from './auth/LoginForm.jsx'
 import Categories from './categories/Categories.jsx'
 import { DataRecordsPage } from './records/FilteredModules.jsx'
-import { bootstrapSession, getUser, logout as clearSession } from './api.js'
+import { bootstrapSession, getUser, logout as clearSession, subscribeSessionExpired } from './api.js'
 import AccountsAccess from './accounts/AccountsAccess.jsx'
 import AccountLinkPage from './accounts/AccountLinkPage.jsx'
 import { adminNavigation } from './admin-navigation.js'
@@ -46,6 +46,7 @@ function WorkspaceApp(){
   const choosePage=(id)=>id==='preview'?enter():setPage(id)
   const navItems=(items)=>items.map(([id,label,icon])=><button className={page===id?'active':''} onClick={()=>choosePage(id)} key={id} title={label}><em>{icon}</em><span className="nav-label">{label}</span></button>)
   useEffect(()=>{let active=true;bootstrapSession().then(next=>{if(active)setUser(next)}).finally(()=>{if(active)setCheckingSession(false)});return()=>{active=false}},[])
+  useEffect(()=>subscribeSessionExpired(()=>setUser(null)),[])
   if(checkingSession)return <main className="login"><div className="login-card"><div className="logo">GO</div><p>Session ကို စစ်ဆေးနေသည်...</p></div></main>
   if(!user)return <Login onLogin={setUser}/>
   if(user.role!=='ADMIN')return <Dashboard published embedded initialAccess={user.role==='VIP_VIEWER'?1:2} viewerUser={user} onLogout={()=>{setUser(null);void clearSession()}}/>
@@ -58,11 +59,11 @@ function WorkspaceApp(){
         <div className="drawer-section"><span className="drawer-section-title">ဒေတာစီမံခန့်ခွဲမှု</span><nav>{navItems(nav.slice(1,3))}</nav></div>
         <div className="drawer-section"><span className="drawer-section-title">စနစ်စီမံခန့်ခွဲမှု</span><nav>{navItems(nav.slice(3,6))}</nav></div>
       </div>
-      <div className="side-foot"><button title="စနစ်ဆက်တင်များ"><em>⚙</em><span className="foot-label">စနစ်ဆက်တင်များ</span></button><button onClick={()=>{setUser(null);void clearSession()}} title="စနစ်မှ ထွက်ရန်"><em>↩</em><span className="foot-label">စနစ်မှ ထွက်ရန်</span></button><small>ဗားရှင်း 1.0.0<br/>© ၂၀၂၆ အစိုးရ အချက်အလက်စနစ်</small></div>
+      <div className="side-foot"><button onClick={()=>{setUser(null);void clearSession()}} title="Logout"><em>↩</em><span className="foot-label">Logout</span></button><small>ဗားရှင်း 1.0.0<br/>© ၂၀၂၆ အစိုးရ အချက်အလက်စနစ်</small></div>
     </aside>
     <main className="main">
       <header className="workspace-header"><div className="header-page-title"><span>{nav.find(n=>n[0]===page)?.[1]}</span></div><div className="profile"><button className="notification-button" aria-label="အသိပေးချက် ၅ ခု"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span>5</span></button><span className="avatar">{user.name?.slice(0,2).toUpperCase()}</span><div><b>{user.name}</b><small>{user.isPrimaryAdmin?'Main Administrator':'Administrator'}</small></div></div></header>
-      {!['entry','categories'].includes(page)&&<div className="page-context"><small>Workspace / {nav.find(n=>n[0]===page)?.[1]}</small><h2>{nav.find(n=>n[0]===page)?.[1]}</h2></div>}
+      {!['entry','categories','accounts'].includes(page)&&<div className="page-context"><small>Workspace / {nav.find(n=>n[0]===page)?.[1]}</small><h2>{nav.find(n=>n[0]===page)?.[1]}</h2></div>}
       {page==='overview'&&<Overview go={setPage}/>}
       {page==='categories'&&<Categories onViewData={(categoryId,collectionId)=>{setCategoryFilter(categoryId);setCollectionFilter(collectionId);setPage('entry')}}/>}
       {page==='entry'&&<DataRecordsPage categoryId={categoryFilter} dataCollectionId={collectionFilter} onOpenCollection={setCollectionFilter} onClearCollection={()=>setCollectionFilter(null)}/>} {page==='activity'&&<Activity/>}

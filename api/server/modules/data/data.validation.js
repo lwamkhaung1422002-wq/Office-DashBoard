@@ -1,10 +1,31 @@
 import { DomainError } from '../../lib/errors.js'
 
-function normalizeDate(value) {
+function utcCalendarDate(year, month, day) {
+  const date = new Date(Date.UTC(year, month - 1, day))
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null
+  return date.toISOString()
+}
+
+export function normalizeDateValue(value) {
   if (value instanceof Date && !Number.isNaN(value.valueOf())) return value.toISOString()
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    const dayFirst = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(trimmed)
+    if (dayFirst) return utcCalendarDate(Number(dayFirst[3]), Number(dayFirst[2]), Number(dayFirst[1]))
+    const yearFirst = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/.exec(trimmed)
+    if (yearFirst) return utcCalendarDate(Number(yearFirst[1]), Number(yearFirst[2]), Number(yearFirst[3]))
+  }
   const date = new Date(value)
   if (Number.isNaN(date.valueOf())) return null
   return date.toISOString()
+}
+
+export function isUnambiguousDateValue(value) {
+  if (value instanceof Date) return !Number.isNaN(value.valueOf())
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  if (!/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(trimmed) && !/^\d{4}[/-]\d{1,2}[/-]\d{1,2}(?:T.*)?$/.test(trimmed)) return false
+  return normalizeDateValue(trimmed) !== null
 }
 
 export function validateRecordPayload(fields, input, { partial = false } = {}) {
@@ -29,7 +50,7 @@ export function validateRecordPayload(fields, input, { partial = false } = {}) {
       else output[field.key] = number
     }
     if (field.type === 'DATE') {
-      const date = normalizeDate(value)
+      const date = normalizeDateValue(value)
       if (!date) errors.push({ field: field.key, code: 'INVALID_DATE' })
       else output[field.key] = date
     }

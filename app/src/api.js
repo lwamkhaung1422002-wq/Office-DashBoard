@@ -3,6 +3,17 @@ const TOKEN_KEY = 'office_access_token'
 const USER_KEY = 'office_user'
 
 let refreshPromise = null
+let refreshShouldNotify = false
+const sessionExpiredListeners = new Set()
+
+export function subscribeSessionExpired(listener) {
+  sessionExpiredListeners.add(listener)
+  return () => sessionExpiredListeners.delete(listener)
+}
+
+function notifySessionExpired() {
+  sessionExpiredListeners.forEach(listener => listener())
+}
 
 export function getToken() {
   return sessionStorage.getItem(TOKEN_KEY)
@@ -35,7 +46,8 @@ function apiError(payload, fallback) {
   })
 }
 
-async function refreshSession() {
+async function refreshSession({ notifyOnFailure = false } = {}) {
+  if (notifyOnFailure) refreshShouldNotify = true
   if (!refreshPromise) {
     refreshPromise = fetch(`${API_BASE}/auth/refresh`, { method: 'POST', credentials: 'include' })
       .then(async response => {
@@ -46,9 +58,13 @@ async function refreshSession() {
       })
       .catch(error => {
         clearSession()
+        if (refreshShouldNotify) notifySessionExpired()
         throw error
       })
-      .finally(() => { refreshPromise = null })
+      .finally(() => {
+        refreshPromise = null
+        refreshShouldNotify = false
+      })
   }
   return refreshPromise
 }
@@ -66,7 +82,7 @@ async function request(path, options = {}, retry = true) {
     },
   })
   if (response.status === 401 && retry && !path.startsWith('/auth/')) {
-    await refreshSession()
+    await refreshSession({ notifyOnFailure: true })
     return request(path, options, false)
   }
   const payload = await response.json().catch(() => ({}))
@@ -89,7 +105,7 @@ export async function apiBlob(path, retry = true) {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
   if (response.status === 401 && retry) {
-    await refreshSession()
+    await refreshSession({ notifyOnFailure: true })
     return apiBlob(path, false)
   }
   if (!response.ok) {

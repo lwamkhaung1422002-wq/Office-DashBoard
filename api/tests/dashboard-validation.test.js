@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createDashboardService, validateWidgetConfiguration } from '../server/modules/dashboard/dashboard.service.js'
+import { aggregateWidget, createDashboardService, validateWidgetConfiguration } from '../server/modules/dashboard/dashboard.service.js'
 
 const fields = [
   { id: 'department', key: 'department', type: 'TEXT', required: false },
@@ -59,5 +59,18 @@ describe('dashboard widget validation', () => {
     const updated = await service.update(created.id, { title: 'All Records' }, 'admin-2')
     expect(updated.updatedById).toBe('admin-2')
     expect(audits.at(-1)).toMatchObject({ action: 'DASHBOARD_WIDGET_UPDATED', actorId: 'admin-2' })
+  })
+
+  it('aggregates Excel-imported count, numeric, and date-compatible payloads', async () => {
+    const queryRaw = vi.fn()
+      .mockResolvedValueOnce([{ value: 3 }])
+      .mockResolvedValueOnce([{ value: 75.5 }])
+      .mockResolvedValueOnce([{ label: new Date('2026-01-01T00:00:00.000Z'), value: 2 }])
+    const prisma = { $queryRaw: queryRaw }
+    const base = { dataCollectionId: 'collection-1', savedFilters: null }
+    await expect(aggregateWidget(prisma, { ...base, chartType: 'KPI', aggregation: 'COUNT' }, 'ADMIN')).resolves.toEqual({ value: 3 })
+    await expect(aggregateWidget(prisma, { ...base, chartType: 'KPI', aggregation: 'SUM', measureField: { key: 'amount' } }, 'ADMIN')).resolves.toEqual({ value: 75.5 })
+    await expect(aggregateWidget(prisma, { ...base, chartType: 'LINE', aggregation: 'COUNT', dimensionField: { key: 'date' }, timeGrouping: 'MONTH' }, 'ADMIN')).resolves.toEqual({ series: [{ label: '2026-01-01T00:00:00.000Z', value: 2 }] })
+    expect(queryRaw).toHaveBeenCalledTimes(3)
   })
 })

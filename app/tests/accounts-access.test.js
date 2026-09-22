@@ -1,33 +1,95 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { accountAccessOptions } from '../src/accounts/AccountsAccess.jsx'
+import { describe, expect, it, vi } from 'vitest'
+import { accountAccessOptions, accountActionItems } from '../src/accounts/accounts-utils.js'
+import { copyText } from '../src/accounts/copy-text.js'
 
 const source = fs.readFileSync(path.resolve(process.cwd(), 'src/accounts/AccountsAccess.jsx'), 'utf8')
+const linkPageSource = fs.readFileSync(path.resolve(process.cwd(), 'src/accounts/AccountLinkPage.jsx'), 'utf8')
 
-describe('Accounts & Access acceptance UI', () => {
-  it('offers only the three assignable access levels', () => {
+describe('User & Access acceptance UI', () => {
+  it('uses the final role labels and assignment order without exposing Main Admin', () => {
     expect(accountAccessOptions).toEqual([
+      { value: 'NORMAL_VIEWER', label: 'Normal' },
+      { value: 'VIP_VIEWER', label: 'VIP' },
       { value: 'ADMIN', label: 'Admin' },
-      { value: 'VIP_VIEWER', label: 'VIP Viewer' },
-      { value: 'NORMAL_VIEWER', label: 'Normal Viewer' },
     ])
     expect(accountAccessOptions.some(option => option.label === 'Main Admin')).toBe(false)
   })
 
-  it('keeps account creation passwordless and exposes the required controls', () => {
-    const addDialog = source.slice(source.indexOf('{showAdd &&'), source.indexOf('{changeAccess &&'))
-    expect(addDialog).not.toContain('type="password"')
-    expect(addDialog).toContain('Full Name *')
-    expect(addDialog).toContain('Email Address *')
-    expect(addDialog).toContain('Access *')
-    expect(source).toContain('Total Accounts')
+  it('is one focused page with no duplicate body title or access-level tabs', () => {
+    expect(source).not.toContain('role="tablist"')
+    expect(source).not.toContain('Access Levels')
+    expect(source).not.toContain('accounts-heading')
+    expect(source).not.toContain('စနစ်စီမံခန့်ခွဲမှု')
+    expect(source).not.toContain('<h1>Accounts')
+  })
+
+  it('contains the compact summaries, filters, sequential No column, and role entry point', () => {
+    expect(source).toContain('Total Users')
     expect(source).toContain('Setup Required')
-    expect(source).toContain('All Access')
+    expect(source).toContain('Deactivated')
+    expect(source).toContain('Search users...')
+    expect(source).toContain('All Role')
     expect(source).toContain('All Status')
-    expect(source).toContain('Generate New Setup Link')
-    expect(source).toContain('Change Access')
-    expect(source).toContain('Reset Login')
-    expect(source).toContain('Protected Main Admin')
+    expect(source).toContain('<th>No</th>')
+    expect(source).toContain('{index + 1}')
+    expect(source).toContain('setChangeAccess({ ...row, nextRole: row.role })')
+  })
+
+  it('keeps Add Account passwordless, concise, and role-card based', () => {
+    const addDialog = source.slice(source.indexOf('{showAdd &&'), source.indexOf('{changeAccess &&'))
+    expect(addDialog).toContain('title="Add Account"')
+    expect(addDialog).toContain('Full Name')
+    expect(addDialog).toContain('Email Address')
+    expect(addDialog).toContain('submitLabel="Add Account"')
+    expect(addDialog).toContain('<RoleOptions')
+    expect(addDialog).not.toContain('type="password"')
+    expect(source).not.toContain('secure one-time setup link')
+    expect(source).not.toContain('Create Setup Link')
+  })
+
+  it('limits each row action menu to the approved lifecycle actions', () => {
+    expect(accountActionItems({ status: 'ACTIVE', kind: 'USER' })).toEqual(['Reset Login', 'Deactivate'])
+    expect(accountActionItems({ status: 'DISABLED', kind: 'USER' })).toEqual(['Reactivate'])
+    expect(accountActionItems({ status: 'SETUP_REQUIRED', kind: 'INVITATION' })).toEqual([])
+    expect(accountActionItems({ status: 'ACTIVE', kind: 'USER', isPrimaryAdmin: true })).toEqual([])
+    const actionsSource = source.slice(source.indexOf('function AccountActions'), source.indexOf('function AccountDialog'))
+    expect(actionsSource).not.toContain('Change Access')
+    expect(actionsSource).not.toContain('Generate New Setup Link')
+    expect(actionsSource).not.toContain('Cancel Invitation')
+    expect(source).toContain('Deactivate this user?')
+    expect(source).toContain('will be signed out and cannot log in until this account is reactivated.')
+  })
+
+  it('validates setup and reset tokens through POST bodies and removes them from browser history', () => {
+    expect(linkPageSource).toContain("method: 'POST'")
+    expect(linkPageSource).toContain('`${endpoint}/validate`')
+    expect(linkPageSource).toContain('JSON.stringify({ token })')
+    expect(linkPageSource).toContain('window.history.replaceState')
+    expect(linkPageSource).not.toContain('?token=')
+  })
+})
+
+describe('copyText', () => {
+  it('uses the Clipboard API when available', async () => {
+    const writeText = vi.fn(async () => {})
+    await expect(copyText('setup-link', { navigator: { clipboard: { writeText } } })).resolves.toBe(true)
+    expect(writeText).toHaveBeenCalledWith('setup-link')
+  })
+
+  it('falls back to a temporary selectable textarea when Clipboard API fails', async () => {
+    const node = { value: '', style: {}, setAttribute: vi.fn(), select: vi.fn(), setSelectionRange: vi.fn(), remove: vi.fn() }
+    const document = { body: { appendChild: vi.fn() }, createElement: vi.fn(() => node), execCommand: vi.fn(() => true) }
+    const navigator = { clipboard: { writeText: vi.fn(async () => { throw new Error('blocked') }) } }
+    await expect(copyText('reset-link', { navigator, document })).resolves.toBe(true)
+    expect(node.select).toHaveBeenCalledOnce()
+    expect(document.execCommand).toHaveBeenCalledWith('copy')
+    expect(node.remove).toHaveBeenCalledOnce()
+  })
+
+  it('fails safely when neither copy path is available', async () => {
+    await expect(copyText('visible-link', {})).resolves.toBe(false)
+    expect(source).toContain('Copy failed. Select the link and copy it manually.')
   })
 })

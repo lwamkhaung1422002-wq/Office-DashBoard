@@ -1,8 +1,7 @@
 export const adminNavigation = [
-  ['overview', 'ပင်မစာမျက်နှာ', '⌂'],
+  ['overview', 'Home Page', '⌂'],
   ['categories', 'File Manager', '✣'],
   ['entry', 'ဒေတာများ', '▦'],
-  ['accounts', 'အသုံးပြုသူနှင့် ဝင်ရောက်ခွင့်', '♟'],
+  ['accounts', 'User & Access', '♟'],
   ['preview', 'Dashboard', '▥'],
-  ['activity', 'လုပ်ဆောင်ချက်မှတ်တမ်း', '◷'],
 ]

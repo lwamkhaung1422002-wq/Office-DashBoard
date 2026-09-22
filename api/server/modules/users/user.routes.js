@@ -49,12 +49,12 @@ export function userRoutes(prisma) {
 export function accountLinkRoutes(prisma) {
   const router = Router()
   const service = createUserService(prisma)
-  router.get('/account/setup', async (req, res) => res.json({ data: await service.validateSetup(linkSchema.parse(req.query).token) }))
+  router.post('/account/setup/validate', async (req, res) => res.json({ data: await service.validateSetup(linkSchema.parse(req.body).token) }))
   router.post('/account/setup', async (req, res) => {
     const input = completeSchema.parse(req.body)
     res.json({ data: await service.completeSetup(input.token, input.password) })
   })
-  router.get('/account/reset', async (req, res) => res.json({ data: await service.validateReset(linkSchema.parse(req.query).token) }))
+  router.post('/account/reset/validate', async (req, res) => res.json({ data: await service.validateReset(linkSchema.parse(req.body).token) }))
   router.post('/account/reset', async (req, res) => {
     const input = completeSchema.parse(req.body)
     res.json({ data: await service.completeReset(input.token, input.password) })

@@ -90,4 +90,19 @@ describe('authentication and user access', () => {
     expect(db.state.audits.map(event => event.action)).toEqual(['USER_ACCESS_CHANGED', 'USER_DISABLED', 'USER_PROFILE_UPDATED'])
     expect(db.state.tokens[0].revokedAt).toBeInstanceOf(Date)
   })
+
+  it('deactivates immediately, blocks login and refresh, then reactivates without changing the password', async () => {
+    const db = memoryDatabase()
+    const password = 'Permanent-password-2026'
+    db.state.users.push({ id: 'user-1', email: 'viewer@example.test', name: 'Viewer', role: 'NORMAL_VIEWER', passwordHash: await bcrypt.hash(password, 4), isActive: true, isPrimaryAdmin: false, loginResetRequired: false, mustChangePassword: false })
+    const initial = await createAuthService(db).login({ email: 'viewer@example.test', password })
+    await createUserService(db).update('user-1', { isActive: false }, 'admin-1')
+    expect(db.state.tokens[0].revokedAt).toBeInstanceOf(Date)
+    await expect(createAuthService(db).login({ email: 'viewer@example.test', password })).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' })
+    await expect(createAuthService(db).refresh(initial.refreshToken)).rejects.toMatchObject({ code: 'INVALID_REFRESH_TOKEN' })
+    await createUserService(db).update('user-1', { isActive: true }, 'admin-1')
+    await expect(createAuthService(db).login({ email: 'viewer@example.test', password })).resolves.toMatchObject({ user: { isActive: true } })
+    expect(db.state.audits.map(event => event.action)).toContain('USER_DISABLED')
+    expect(db.state.audits.map(event => event.action)).toContain('USER_ENABLED')
+  })
 })
