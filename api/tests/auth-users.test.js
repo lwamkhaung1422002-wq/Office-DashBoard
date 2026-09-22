@@ -85,8 +85,9 @@ describe('authentication and user access', () => {
   it('audits role, account status, and profile changes as separate events', async () => {
     const db = memoryDatabase()
     db.state.users.push({ id: 'user-1', email: 'viewer@example.test', name: 'Viewer', role: 'NORMAL_VIEWER', isActive: true, mustChangePassword: false })
+    db.state.tokens.push({ id: 'token-1', userId: 'user-1', revokedAt: null })
     await createUserService(db).update('user-1', { name: 'VIP Viewer', role: 'VIP_VIEWER', isActive: false }, 'admin-1')
     expect(db.state.audits.map(event => event.action)).toEqual(['USER_ACCESS_CHANGED', 'USER_DISABLED', 'USER_PROFILE_UPDATED'])
-    expect(db.state.tokens).toHaveLength(0)
+    expect(db.state.tokens[0].revokedAt).toBeInstanceOf(Date)
   })
 })

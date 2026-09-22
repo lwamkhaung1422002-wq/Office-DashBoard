@@ -39,4 +39,25 @@ describe('dashboard widget validation', () => {
     expect(preview.data).toEqual({ value: 7 })
     expect(preview.widget.dataCollectionId).toBe('collection-1')
   })
+
+  it('tracks the real creator and latest modifier for dashboard widgets', async () => {
+    let widget = null
+    const audits = []
+    const prisma = {
+      dataCollection: { findFirst: vi.fn(async () => ({ id: 'collection-1', fields })) },
+      dashboardWidget: {
+        create: vi.fn(async ({ data }) => { widget = { id: 'widget-1', archivedAt: null, ...data }; return widget }),
+        findFirst: vi.fn(async () => widget),
+        update: vi.fn(async ({ data }) => { widget = { ...widget, ...data }; return widget }),
+      },
+      auditLog: { create: vi.fn(async ({ data }) => { audits.push(data); return data }) },
+      $transaction: callback => callback(prisma),
+    }
+    const service = createDashboardService(prisma)
+    const created = await service.create({ title: 'Records', dataCollectionId: 'collection-1', chartType: 'KPI', aggregation: 'COUNT', accessLevel: 'NORMAL', sortOrder: 0, isActive: true }, 'admin-1')
+    expect(created).toMatchObject({ createdById: 'admin-1', updatedById: 'admin-1' })
+    const updated = await service.update(created.id, { title: 'All Records' }, 'admin-2')
+    expect(updated.updatedById).toBe('admin-2')
+    expect(audits.at(-1)).toMatchObject({ action: 'DASHBOARD_WIDGET_UPDATED', actorId: 'admin-2' })
+  })
 })

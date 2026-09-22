@@ -40,7 +40,12 @@ function memoryDatabase() {
         return row
       },
       updateMany: async ({ where, data }) => {
-        const rows = state.invites.filter(item => (!where.id || item.id === where.id) && (!where.email || item.email === where.email) && !item.acceptedAt && !item.revokedAt)
+        const rows = state.invites.filter(item => {
+          const expiryMatches = !where.expiresAt
+            || (where.expiresAt.lte && item.expiresAt <= where.expiresAt.lte)
+            || (where.expiresAt.gt && item.expiresAt > where.expiresAt.gt)
+          return (!where.id || item.id === where.id) && (!where.email || item.email === where.email) && !item.acceptedAt && !item.revokedAt && expiryMatches
+        })
         rows.forEach(item => Object.assign(item, data, { updatedAt: new Date() }))
         return { count: rows.length }
       },
@@ -77,6 +82,34 @@ function memoryDatabase() {
 }
 
 describe('account invitation and reset lifecycle', () => {
+  it('rejects duplicate active accounts and duplicate pending invitations', async () => {
+    const activeDb = memoryDatabase()
+    activeDb.state.users.push({ id: 'viewer', email: 'viewer@example.test', name: 'Viewer', role: 'NORMAL_VIEWER', isActive: true })
+    await expect(createUserService(activeDb).invite({ email: 'VIEWER@example.test', name: 'Duplicate', role: 'VIP_VIEWER' }, 'admin-1'))
+      .rejects.toMatchObject({ code: 'ACCOUNT_ALREADY_EXISTS' })
+
+    const pendingDb = memoryDatabase()
+    const pendingService = createUserService(pendingDb)
+    await pendingService.invite({ email: 'pending@example.test', name: 'Pending Viewer', role: 'NORMAL_VIEWER' }, 'admin-1')
+    await expect(pendingService.invite({ email: 'pending@example.test', name: 'Pending Viewer', role: 'NORMAL_VIEWER' }, 'admin-1'))
+      .rejects.toMatchObject({ code: 'INVITATION_ALREADY_PENDING' })
+  })
+
+  it('rejects cancelled and expired setup links', async () => {
+    const db = memoryDatabase()
+    const service = createUserService(db)
+    const cancelled = await service.invite({ email: 'cancelled@example.test', name: 'Cancelled Viewer', role: 'NORMAL_VIEWER' }, 'admin-1')
+    const cancelledToken = new URL(cancelled.setupUrl).searchParams.get('token')
+    await service.cancelInvite(cancelled.invitation.id, 'admin-1')
+    await expect(service.validateSetup(cancelledToken)).rejects.toMatchObject({ code: 'INVALID_ACCOUNT_LINK' })
+
+    const expired = await service.invite({ email: 'expired@example.test', name: 'Expired Viewer', role: 'VIP_VIEWER' }, 'admin-1')
+    const expiredToken = new URL(expired.setupUrl).searchParams.get('token')
+    const expiredRow = db.state.invites.find(item => item.id === expired.invitation.id)
+    expiredRow.expiresAt = new Date(Date.now() - 1000)
+    await expect(service.validateSetup(expiredToken)).rejects.toMatchObject({ code: 'INVALID_ACCOUNT_LINK' })
+  })
+
   it('rotates setup links and accepts an invitation only once', async () => {
     const db = memoryDatabase()
     const service = createUserService(db)

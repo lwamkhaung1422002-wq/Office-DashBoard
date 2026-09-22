@@ -96,9 +96,11 @@ describe('category service', () => {
     const first = await service.create({ name: 'First' }, 'admin-1')
     const second = await service.create({ name: 'Second' }, 'admin-1')
     const child = await service.create({ name: 'Child', parentId: first.id }, 'admin-1')
-    await service.update(child.id, { name: 'Renamed' }, 'admin-1')
-    const moved = await service.move(child.id, second.id, 'admin-1')
+    await service.update(child.id, { name: 'Renamed' }, 'admin-2')
+    const moved = await service.move(child.id, second.id, 'admin-2')
     expect(moved.parentId).toBe(second.id)
+    expect(db.state.categories.find(item => item.id === child.id)).toMatchObject({ createdById: 'admin-1', updatedById: 'admin-2' })
+    expect(db.state.audits.at(-1).actorId).toBe('admin-2')
     expect(db.state.audits.at(-1)).toMatchObject({ action: 'CATEGORY_MOVED', before: { parentId: first.id }, after: { parentId: second.id, parentName: 'Second' } })
   })
 

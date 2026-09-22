@@ -45,8 +45,11 @@ describe('unified data service', () => {
     expect(created.sourceType).toBe('MANUAL')
     expect(created.sourceImportId).toBeNull()
     expect(created.payload.budget).toBe(500000)
-    const updated = await service.update(created.id, { payload: { budget: 550000 } }, 'admin-1')
+    expect(created).toMatchObject({ createdById: 'admin-1', updatedById: 'admin-1' })
+    const updated = await service.update(created.id, { payload: { budget: 550000 } }, 'admin-2')
     expect(updated.payload.budget).toBe(550000)
+    expect(updated.updatedById).toBe('admin-2')
+    expect(db.state.audits.at(-1).actorId).toBe('admin-2')
     expect(db.state.audits.map(item => item.action)).toEqual(['DATA_CREATED', 'DATA_UPDATED'])
   })
 
@@ -73,9 +76,11 @@ describe('unified data service', () => {
   it('moves a structured data collection and its related records/imports together', async () => {
     db.state.records.push({ id: 'row-1', categoryId: 'category-1', dataCollectionId: 'collection-1' })
     db.state.imports.push({ id: 'import-1', categoryId: 'category-1', dataCollectionId: 'collection-1' })
-    await service.updateCollection('collection-1', { categoryId: 'category-2', name: 'Budget 2026' }, 'admin-1')
+    await service.updateCollection('collection-1', { categoryId: 'category-2', name: 'Budget 2026' }, 'admin-2')
     expect(db.state.records[0].categoryId).toBe('category-2')
+    expect(db.state.records[0].updatedById).toBe('admin-2')
     expect(db.state.imports[0].categoryId).toBe('category-2')
+    expect((await service.getCollection('collection-1')).updatedById).toBe('admin-2')
   })
 
   it('soft-deletes and restores a structured data collection with its records', async () => {

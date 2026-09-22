@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 import './accounts-access.css'
 
+const roleLabels = { ADMIN: 'Admin', VIP_VIEWER: 'VIP Viewer', NORMAL_VIEWER: 'Normal Viewer' }
+
 export default function AccountLinkPage({ mode }) {
   const token = new URLSearchParams(window.location.search).get('token') || ''
   const [details, setDetails] = useState(null)
@@ -32,7 +34,7 @@ export default function AccountLinkPage({ mode }) {
   return <main className="account-link-page"><section>
     <div className="account-link-mark">▣</div>
     <span>Government Data Management System</span>
-    <h1>{mode === 'setup' ? 'အကောင့် စတင်အသုံးပြုရန်' : 'Password အသစ်သတ်မှတ်ရန်'}</h1>
-    {state.loading && !details ? <p>Link ကို စစ်ဆေးနေသည်...</p> : state.error && !details ? <div className="accounts-alert">{state.error}</div> : state.complete ? <><div className="account-success">✓ Password ကို အောင်မြင်စွာသတ်မှတ်ပြီးပါပြီ။</div><button className="accounts-primary" onClick={() => { window.location.href = '/' }}>Login သို့သွားရန်</button></> : <form onSubmit={submit}><div className="link-identity"><b>{details?.name}</b><small>{details?.email}</small></div>{state.error && <div className="accounts-alert">{state.error}</div>}<label>Password အသစ်<input type="password" required minLength="12" value={password} onChange={event => setPassword(event.target.value)} /></label><label>Password အတည်ပြုရန်<input type="password" required minLength="12" value={confirm} onChange={event => setConfirm(event.target.value)} /></label><button className="accounts-primary" disabled={state.loading}>{state.loading ? 'သိမ်းဆည်းနေသည်...' : 'Password သိမ်းဆည်းရန်'}</button></form>}
+    <h1>{mode === 'setup' ? 'Set Up Account' : 'Reset Account Login'}</h1>
+    {state.loading && !details ? <p>Link ကို စစ်ဆေးနေသည်...</p> : state.error && !details ? <div className="accounts-alert">{state.error}</div> : state.complete ? <><div className="account-success">✓ {mode === 'setup' ? 'Account setup completed.' : 'Password reset completed.'}</div><button className="accounts-primary" onClick={() => { window.location.href = '/' }}>Continue to Login</button></> : <form onSubmit={submit}><div className="link-identity"><b>{details?.name}</b><small>Email: {details?.email}</small>{mode === 'setup' && <small>Access: {roleLabels[details?.role]}</small>}</div>{state.error && <div className="accounts-alert">{state.error}</div>}<label>New Password<input type="password" required minLength="12" value={password} onChange={event => setPassword(event.target.value)} /></label><label>Confirm Password<input type="password" required minLength="12" value={confirm} onChange={event => setConfirm(event.target.value)} /></label><button className="accounts-primary" disabled={state.loading}>{state.loading ? 'Saving...' : mode === 'setup' ? 'Set Up Account' : 'Set New Password'}</button></form>}
   </section></main>
 }
