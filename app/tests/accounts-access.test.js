@@ -38,6 +38,14 @@ describe('User & Access acceptance UI', () => {
     expect(source).toContain('setChangeAccess({ ...row, nextRole: row.role })')
   })
 
+  it('keeps Search, Role, Status, and Add Account in one desktop toolbar', () => {
+    const toolbar = source.slice(source.indexOf('<div className="accounts-toolbar account-filter-toolbar">'), source.indexOf('</div>\n      {loading ?'))
+    for (const item of ['Search users...', 'Filter by role', 'Filter by status', 'Add Account']) expect(toolbar).toContain(item)
+    expect(source).not.toContain('accounts-top-actions')
+    expect(enhancementCss).toContain('width:400px')
+    expect(enhancementCss).toContain('.account-toolbar-add{margin-left:auto')
+  })
+
   it('keeps Add Account passwordless, concise, and role-card based', () => {
     const addDialog = source.slice(source.indexOf('{showAdd &&'), source.indexOf('{changeAccess &&'))
     expect(addDialog).toContain('title="Add Account"')
@@ -48,6 +56,12 @@ describe('User & Access acceptance UI', () => {
     expect(addDialog).not.toContain('type="password"')
     expect(source).not.toContain('secure one-time setup link')
     expect(source).not.toContain('Create Setup Link')
+  })
+
+  it('keeps account setup and reset frontend validation at 12 characters', () => {
+    expect(linkPageSource).toContain('password.length < 12')
+    expect((linkPageSource.match(/minLength="12"/g) || [])).toHaveLength(2)
+    expect(linkPageSource).toContain('အနည်းဆုံး 12')
   })
 
   it('limits each row action menu to the approved lifecycle actions', () => {

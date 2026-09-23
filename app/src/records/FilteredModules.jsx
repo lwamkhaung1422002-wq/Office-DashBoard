@@ -20,7 +20,7 @@ import VisibilityOutlined from '@mui/icons-material/VisibilityOutlined'
 import { api, apiEnvelope } from '../api.js'
 import { useCategoryTree } from '../categories/category-queries.js'
 import { SemanticFileIcon } from '../shared/SemanticFileIcon.jsx'
-import { archiveDashboardWidget, archiveRecordRequest, clearCollectionContext, createRecordRequest, dataCollectionDetailsRequest, fieldInputType, filterFolderTree, generateRecordTitle, handleCollectionEnter, loadCollectionDashboard, previewDashboardWidget, recordQueryParams, reorderDashboardWidgets, saveDashboardWidget, topSeriesWithOthers, updateRecordRequest, widgetFieldChoices, widgetRequestBody } from './data-workspace-utils.js'
+import { archiveDashboardWidget, archiveRecordRequest, clearCollectionContext, createRecordRequest, dataCollectionDetailsRequest, fieldInputType, filterFolderTree, generateRecordTitle, handleCollectionEnter, loadCollectionDashboard, previewDashboardWidget, recordQueryParams, reorderDashboardWidgets, saveDashboardWidget, topSeriesWithOthers, updateRecordRequest, widgetFieldChoices, widgetFormError, widgetRequestBody } from './data-workspace-utils.js'
 import './filtered-modules.css'
 import './data-workspace.css'
 import './data-dashboard.css'
@@ -140,7 +140,8 @@ export function DashboardDialog({ collection, widget = null, onClose, onSaved })
   const set = (key, value) => setForm(current => ({ ...current, [key]: value }))
   const choices = widgetFieldChoices(collection.fields, form.chartType)
   const needsDimension = ['PIE', 'BAR', 'LINE'].includes(form.chartType)
-  const valid = form.title.trim() && (!needsDimension || form.dimensionFieldId) && (form.aggregation === 'COUNT' || form.measureFieldId)
+  const validationError = widgetFormError(form, collection.fields)
+  const valid = !validationError
   const body = () => widgetRequestBody(form, collection.id)
   async function runPreview() {
     setBusy(true); setError('')
@@ -154,7 +155,20 @@ export function DashboardDialog({ collection, widget = null, onClose, onSaved })
       onSaved(saved)
     } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
   }
-  return <Modal title={widget ? 'Edit Widget' : 'Add Widget'} eyebrow={collection.name} onClose={onClose} actions={<><button onClick={onClose}>Cancel</button><button onClick={runPreview} disabled={busy || !valid}>Preview</button><button className="primary" onClick={save} disabled={busy || !valid}>{busy ? 'Saving…' : widget ? 'Save changes' : 'Add Widget'}</button></>}><div className="data-record-form"><label>Widget Type<select value={form.chartType} onChange={event => { const chartType = event.target.value; setForm(current => ({ ...current, chartType, dimensionFieldId: '', timeGrouping: chartType === 'LINE' ? 'MONTH' : '' })) }}>{['KPI','PIE','BAR','LINE','CATEGORY_SUMMARY'].map(item => <option key={item}>{item}</option>)}</select></label><label>Title<input value={form.title} onChange={event => set('title', event.target.value)} /></label>{needsDimension && <label>Group By<select value={form.dimensionFieldId} onChange={event => set('dimensionFieldId', event.target.value)}><option value="">ရွေးချယ်ပါ</option>{choices.dimensions.map(field => <option key={field.id} value={field.id}>{field.label}</option>)}</select></label>}<label>Calculation<select value={form.aggregation} onChange={event => set('aggregation', event.target.value)}>{['COUNT','SUM','AVG','MIN','MAX'].map(item => <option key={item}>{item}</option>)}</select></label>{form.aggregation !== 'COUNT' && <label>Value<select value={form.measureFieldId} onChange={event => set('measureFieldId', event.target.value)}><option value="">ရွေးချယ်ပါ</option>{choices.measures.map(field => <option key={field.id} value={field.id}>{field.label}</option>)}</select></label>}{form.chartType === 'LINE' && <label>Time Grouping<select value={form.timeGrouping} onChange={event => set('timeGrouping', event.target.value)}>{['DAY','MONTH','QUARTER','YEAR'].map(item => <option key={item}>{item}</option>)}</select></label>}<label>View<select value={form.accessLevel} onChange={event => set('accessLevel', event.target.value)}><option value="NORMAL">Normal</option><option value="VIP">VIP</option></select></label></div>{preview && <div className="data-widget-preview"><WidgetVisualization widget={body()} data={preview.data} /></div>}{error && <p className="data-error">{error}</p>}</Modal>
+  return <Modal title={widget ? 'Edit Widget' : 'Add Widget'} eyebrow={collection.name} onClose={onClose} actions={<><button onClick={onClose}>Cancel</button><button onClick={runPreview} disabled={busy || !valid}>Preview</button><button className="primary" onClick={save} disabled={busy || !valid}>{busy ? 'Saving…' : widget ? 'Save changes' : 'Add Widget'}</button></>}>
+    <div className="data-record-form">
+      <label>Widget Type<select value={form.chartType} onChange={event => { const chartType = event.target.value; setPreview(null); setForm(current => ({ ...current, chartType, dimensionFieldId: '', timeGrouping: chartType === 'LINE' ? 'MONTH' : '' })) }}>{['KPI', 'PIE', 'BAR', 'LINE'].map(item => <option key={item}>{item}</option>)}{widget?.chartType === 'CATEGORY_SUMMARY' && <option value="CATEGORY_SUMMARY">Category Summary (existing)</option>}</select></label>
+      <label>Title<input value={form.title} onChange={event => set('title', event.target.value)} /></label>
+      {needsDimension && <label>Group By<select value={form.dimensionFieldId} onChange={event => { setPreview(null); set('dimensionFieldId', event.target.value) }}><option value="">ရွေးချယ်ပါ</option>{choices.dimensions.map(field => <option key={field.id} value={field.id}>{field.label}</option>)}</select></label>}
+      <label>Calculation<select value={form.aggregation} onChange={event => { setPreview(null); set('aggregation', event.target.value) }}>{['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'].map(item => <option key={item}>{item}</option>)}</select></label>
+      {form.aggregation !== 'COUNT' && <label>Value<select value={form.measureFieldId} onChange={event => { setPreview(null); set('measureFieldId', event.target.value) }}><option value="">ရွေးချယ်ပါ</option>{choices.measures.map(field => <option key={field.id} value={field.id}>{field.label}</option>)}</select></label>}
+      {form.chartType === 'LINE' && <label>Time Grouping<select value={form.timeGrouping} onChange={event => { setPreview(null); set('timeGrouping', event.target.value) }}>{['DAY', 'MONTH', 'QUARTER', 'YEAR'].map(item => <option key={item}>{item}</option>)}</select></label>}
+      <label>View<select value={form.accessLevel} onChange={event => set('accessLevel', event.target.value)}><option value="NORMAL">Normal</option><option value="VIP">VIP</option></select></label>
+    </div>
+    {validationError && <p className="data-widget-hint">{validationError}</p>}
+    {preview && <div className="data-widget-preview"><WidgetVisualization widget={body()} data={preview.data} /></div>}
+    {error && <p className="data-error" role="alert">{error}</p>}
+  </Modal>
 }
 
 export function DataDashboard({ loading, error, items, customize, onAdd, onEdit, onRemove, onMove }) {

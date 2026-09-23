@@ -64,19 +64,35 @@ function filterTree(nodes, query) {
   })
 }
 
+function visibleViewerBranches(nodes) {
+  return nodes.flatMap(node => {
+    const children = visibleViewerBranches(node.children)
+    return node.directDataCount || node.directDocumentCount || children.length
+      ? [{ ...node, children }]
+      : []
+  })
+}
+
 async function loadHierarchy(db, includeArchived = false, role) {
   const where = includeArchived ? {} : activeWhere
+  const viewer = role && role !== 'ADMIN'
   const contentWhere = { ...activeWhere, ...(role ? { accessLevel: { in: allowedAccessLevels(role) } } : {}) }
   const [categories, dataGroups, documentGroups] = await Promise.all([
     db.category.findMany({ where, include: { createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } } }),
-    db.dataRecord.groupBy({ by: ['categoryId'], where: contentWhere, _count: { _all: true } }),
+    db.dataRecord.groupBy({ by: ['categoryId'], where: { ...contentWhere, ...(viewer ? { dataCollection: { archivedAt: null, defaultAccessLevel: { in: allowedAccessLevels(role) } } } : {}) }, _count: { _all: true } }),
     db.document.groupBy({ by: ['categoryId'], where: contentWhere, _count: { _all: true } }),
   ])
-  return assembleTree(
+  const hierarchy = assembleTree(
     categories,
     new Map(dataGroups.map(group => [group.categoryId, group._count._all])),
     new Map(documentGroups.map(group => [group.categoryId, group._count._all])),
   )
+  if (!viewer) return hierarchy
+  const roots = visibleViewerBranches(hierarchy.roots)
+  const byId = new Map()
+  const visit = node => { byId.set(node.id, node); node.children.forEach(visit) }
+  roots.forEach(visit)
+  return { roots, byId }
 }
 
 async function categorySubtree(db, rootId) {
@@ -104,7 +120,7 @@ export function createCategoryService(prisma) {
     async details(id, role) {
       const record = await prisma.category.findUnique({ where: { id } })
       if (!record) throw notFound('Category')
-      const { roots, byId } = await loadHierarchy(prisma, Boolean(record.archivedAt), role)
+      const { roots, byId } = await loadHierarchy(prisma, role === 'ADMIN' && Boolean(record.archivedAt), role)
       const selected = byId.get(id)
       if (!selected) throw notFound('Category')
       const breadcrumb = []

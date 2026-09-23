@@ -118,7 +118,6 @@ export default function AccountsAccess() {
   const reactivate = row => perform(() => api(`/admin/users/${row.id}/enable`, { method: 'POST' }))
 
   return <section className="accounts-access">
-    <div className="accounts-top-actions"><button className="accounts-primary" onClick={() => setShowAdd(true)}>＋ Add Account</button></div>
     {error && <div className="accounts-alert">{error}</div>}
 
     <div className="account-summary-grid">
@@ -135,6 +134,7 @@ export default function AccountsAccess() {
           <select aria-label="Filter by role" value={roleFilter} onChange={event => setRoleFilter(event.target.value)}><option value="ALL">All Role</option>{accountAccessOptions.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
           <select aria-label="Filter by status" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="ALL">All Status</option><option value="ACTIVE">Active</option><option value="SETUP_REQUIRED">Setup Required</option><option value="DISABLED">Deactivated</option><option value="RESET_REQUIRED">Reset Required</option></select>
         </div>
+        <button className="accounts-primary account-toolbar-add" onClick={() => setShowAdd(true)}>＋ Add Account</button>
       </div>
       {loading ? <div className="accounts-state">အချက်အလက် ရယူနေသည်...</div> : <div className="accounts-table-wrap"><table>
         <thead><tr><th>No</th><th>User</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>

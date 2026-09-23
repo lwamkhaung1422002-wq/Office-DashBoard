@@ -30,6 +30,14 @@ function accessWhere(role) {
   return { accessLevel: { in: allowedAccessLevels(role) } }
 }
 
+function collectionAccessWhere(role) {
+  return role === 'ADMIN' ? {} : { dataCollection: { archivedAt: null, defaultAccessLevel: { in: allowedAccessLevels(role) } }, category: { archivedAt: null } }
+}
+
+function visibleCollectionInclude(role) {
+  return role === 'ADMIN' ? collectionInclude : { ...collectionInclude, _count: { select: { records: { where: { archivedAt: null, ...accessWhere(role) } } } } }
+}
+
 export function createDataService(prisma) {
   async function collection(id) {
     const value = await prisma.dataCollection.findFirst({ where: { id, archivedAt: null }, include: collectionInclude })
@@ -37,8 +45,14 @@ export function createDataService(prisma) {
     return value
   }
 
+  async function visibleCollection(id, role) {
+    const value = await prisma.dataCollection.findFirst({ where: { id, archivedAt: null, ...(role ? { defaultAccessLevel: { in: allowedAccessLevels(role) }, ...(role === 'ADMIN' ? {} : { category: { archivedAt: null } }) } : {}) }, include: visibleCollectionInclude(role) })
+    if (!value) throw notFound('Data collection')
+    return value
+  }
+
   async function recordForUser(id, role, includeArchived = false) {
-    const record = await prisma.dataRecord.findFirst({ where: { id, ...accessWhere(role), ...(includeArchived ? {} : { archivedAt: null }) }, include: { dataCollection: { include: collectionInclude }, createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } } })
+    const record = await prisma.dataRecord.findFirst({ where: { id, ...accessWhere(role), ...collectionAccessWhere(role), ...(includeArchived ? {} : { archivedAt: null }) }, include: { dataCollection: { include: visibleCollectionInclude(role) }, createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } } })
     if (!record) throw notFound('Data record')
     return record
   }
@@ -78,13 +92,9 @@ export function createDataService(prisma) {
       })
     },
     listCollections(categoryId, role) {
-      return prisma.dataCollection.findMany({ where: { archivedAt: null, ...(categoryId ? { categoryId } : {}), ...(role ? { defaultAccessLevel: { in: allowedAccessLevels(role) } } : {}) }, include: collectionInclude, orderBy: { name: 'asc' }, take: 500 })
+      return prisma.dataCollection.findMany({ where: { archivedAt: null, ...(categoryId ? { categoryId } : {}), ...(role ? { defaultAccessLevel: { in: allowedAccessLevels(role) }, ...(role === 'ADMIN' ? {} : { category: { archivedAt: null } }) } : {}) }, include: visibleCollectionInclude(role), orderBy: { name: 'asc' }, take: 500 })
     },
-    async getCollection(id, role) {
-      const value = await collection(id)
-      if (role && !allowedAccessLevels(role).includes(value.defaultAccessLevel)) throw notFound('Data collection')
-      return value
-    },
+    getCollection: visibleCollection,
     async archiveCollection(id, actorId) {
       const before = await prisma.dataCollection.findUnique({ where: { id }, include: collectionInclude })
       if (!before) throw notFound('Data collection')
@@ -113,10 +123,10 @@ export function createDataService(prisma) {
     async list(query, role) {
       const take = Math.min(100, Math.max(1, query.limit || 50))
       /** @type {any} */
-      const where = { archivedAt: null, ...accessWhere(role) }
+      const where = { archivedAt: null, ...accessWhere(role), ...collectionAccessWhere(role) }
       if (query.categoryId) where.categoryId = { in: await categoryIds(prisma, query.categoryId, query.includeDescendants) }
       if (query.dataCollectionId) where.dataCollectionId = query.dataCollectionId
-      const definitions = query.dataCollectionId ? (await collection(query.dataCollectionId)).fields : []
+      const definitions = query.dataCollectionId ? (await visibleCollection(query.dataCollectionId, role)).fields : []
       if (query.search) {
         const textFields = definitions.filter(field => ['TEXT', 'ENUM'].includes(field.type))
         where.OR = [
@@ -185,7 +195,7 @@ export function createDataService(prisma) {
       })
     },
     async filterOptions(dataCollectionId, fieldKey, role) {
-      const definition = await collection(dataCollectionId)
+      const definition = await visibleCollection(dataCollectionId, role)
       if (!definition.fields.some(field => field.key === fieldKey)) throw new DomainError(422, 'UNKNOWN_DATA_FIELD', 'The requested field is not defined')
       const rows = await prisma.dataRecord.findMany({ where: { dataCollectionId, archivedAt: null, ...accessWhere(role) }, select: { payload: true }, take: 5000 })
       return [...new Set(rows.map(row => row.payload[fieldKey]).filter(value => value !== null && value !== undefined))].sort()

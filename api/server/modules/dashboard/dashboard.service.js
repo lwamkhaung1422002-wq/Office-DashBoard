@@ -41,6 +41,8 @@ export async function aggregateWidget(prisma, widget, role) {
     Prisma.sql`dr."dataCollectionId" = ${widget.dataCollectionId}`,
     Prisma.sql`dr."archivedAt" IS NULL`,
     Prisma.sql`dr."accessLevel" IN (${access})`,
+    ...(role === 'ADMIN' ? [] : [Prisma.sql`EXISTS (SELECT 1 FROM "DataCollection" dc WHERE dc."id" = dr."dataCollectionId" AND dc."archivedAt" IS NULL AND dc."defaultAccessLevel" IN (${access}))`]),
+    ...(role === 'ADMIN' ? [] : [Prisma.sql`EXISTS (SELECT 1 FROM "Category" cat WHERE cat."id" = dr."categoryId" AND cat."archivedAt" IS NULL)`]),
     ...filterSql(widget),
   ]
   const where = Prisma.join(clauses, ' AND ')
@@ -116,7 +118,7 @@ export function createDashboardService(prisma) {
       return { widget: selected, data: await aggregateWidget(prisma, selected, role) }
     },
     async viewerDashboard(role) {
-      const widgets = await prisma.dashboardWidget.findMany({ where: { archivedAt: null, isActive: true, dataCollection: { archivedAt: null }, accessLevel: { in: allowedAccessLevels(role) } }, include: includeDefinition, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] })
+      const widgets = await prisma.dashboardWidget.findMany({ where: { archivedAt: null, isActive: true, dataCollection: { archivedAt: null, ...(role === 'ADMIN' ? {} : { defaultAccessLevel: { in: allowedAccessLevels(role) }, category: { archivedAt: null } }) }, accessLevel: { in: allowedAccessLevels(role) } }, include: includeDefinition, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] })
       return Promise.all(widgets.map(async item => ({ widget: item, data: await aggregateWidget(prisma, item, role) })))
     },
   }

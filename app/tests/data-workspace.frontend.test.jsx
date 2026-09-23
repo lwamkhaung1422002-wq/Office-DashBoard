@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { CollectionMenu, ConfirmDialog, DashboardDialog, DataCollectionRow, DataDashboard, DataRecordRow, DataRecordsHeader, DataRecordToolbar, FolderTree, RecordDialog, RecordMenu, WidgetVisualization } from '../src/records/FilteredModules.jsx'
 import { SemanticFileIcon } from '../src/shared/SemanticFileIcon.jsx'
 import { semanticFileType } from '../src/shared/semantic-file-types.js'
-import { archiveDashboardWidget, archiveRecordRequest, clearCollectionContext, createRecordRequest, dataCollectionDetailsRequest, fieldInputType, filterFolderTree, generateRecordTitle, loadCollectionDashboard, previewDashboardWidget, recordQueryParams, reorderDashboardWidgets, saveDashboardWidget, topSeriesWithOthers, updateRecordRequest, widgetFieldChoices, widgetRequestBody } from '../src/records/data-workspace-utils.js'
+import { archiveDashboardWidget, archiveRecordRequest, clearCollectionContext, createRecordRequest, dataCollectionDetailsRequest, fieldInputType, filterFolderTree, generateRecordTitle, loadCollectionDashboard, previewDashboardWidget, recordQueryParams, reorderDashboardWidgets, saveDashboardWidget, topSeriesWithOthers, updateRecordRequest, widgetFieldChoices, widgetFormError, widgetRequestBody } from '../src/records/data-workspace-utils.js'
 
 const workspaceSource = fs.readFileSync(path.resolve(process.cwd(), 'src/records/FilteredModules.jsx'), 'utf8')
 const dashboardCss = fs.readFileSync(path.resolve(process.cwd(), 'src/records/data-dashboard.css'), 'utf8')
@@ -235,5 +235,18 @@ describe('Data workspace frontend', () => {
     expect(editor).toContain('Preview')
     expect(editor).toContain('Widget Type')
     expect(editor).toContain('View')
+    for (const chartType of ['KPI', 'PIE', 'BAR', 'LINE']) expect(editor).toContain(`>${chartType}</option>`)
+    expect(editor).not.toContain('CATEGORY_SUMMARY')
+    const valid = { title: 'Records', chartType: 'KPI', aggregation: 'COUNT', dimensionFieldId: '', measureFieldId: '' }
+    expect(widgetFormError(valid, collection.fields)).toBe('')
+    expect(widgetFormError({ ...valid, chartType: 'PIE', dimensionFieldId: 'f1' }, collection.fields)).toBe('')
+    expect(widgetFormError({ ...valid, chartType: 'BAR', dimensionFieldId: 'f3' }, collection.fields)).toBe('')
+    expect(widgetFormError({ ...valid, chartType: 'LINE', dimensionFieldId: 'date' }, [...collection.fields, { id: 'date', type: 'DATE' }])).toBe('')
+    for (const aggregation of ['SUM', 'AVG', 'MIN', 'MAX']) {
+      expect(widgetFormError({ ...valid, aggregation, measureFieldId: '' }, collection.fields)).toContain('Number field')
+      expect(widgetFormError({ ...valid, aggregation, measureFieldId: 'f2' }, collection.fields)).toBe('')
+    }
+    expect(widgetFormError({ ...valid, chartType: 'LINE', dimensionFieldId: 'f1' }, collection.fields)).toContain('Date field')
+    expect(widgetFormError({ ...valid, chartType: 'PIE', dimensionFieldId: 'f2' }, collection.fields)).toContain('valid Group By')
   })
 })

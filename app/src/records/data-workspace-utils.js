@@ -66,10 +66,25 @@ export function archiveRecordRequest(id) {
 }
 
 export function widgetFieldChoices(fields = [], chartType = 'KPI') {
+  const available = Array.isArray(fields) ? fields : []
   return {
-    dimensions: fields.filter(field => chartType === 'LINE' ? field.type === 'DATE' : ['TEXT', 'ENUM'].includes(field.type)),
-    measures: fields.filter(field => field.type === 'NUMBER'),
+    dimensions: available.filter(field => chartType === 'LINE' ? field.type === 'DATE' : ['TEXT', 'ENUM'].includes(field.type)),
+    measures: available.filter(field => field.type === 'NUMBER'),
   }
+}
+
+export function widgetFormError(form, fields) {
+  const { dimensions, measures } = widgetFieldChoices(fields, form.chartType)
+  if (!form.title.trim()) return 'Enter a widget title.'
+  if (['PIE', 'BAR', 'LINE'].includes(form.chartType)) {
+    if (!dimensions.length) return form.chartType === 'LINE' ? 'This data file needs a Date field for a Line chart.' : 'This data file needs a Text or Select field for this chart.'
+    if (!dimensions.some(field => field.id === form.dimensionFieldId)) return 'Select a valid Group By field.'
+  }
+  if (form.aggregation !== 'COUNT') {
+    if (!measures.length) return 'This data file needs a Number field for this calculation.'
+    if (!measures.some(field => field.id === form.measureFieldId)) return 'Select a valid Number field.'
+  }
+  return ''
 }
 
 export function widgetRequestBody(form, dataCollectionId) {

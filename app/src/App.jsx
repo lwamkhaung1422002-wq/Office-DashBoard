@@ -4,6 +4,7 @@ import Categories from './categories/Categories.jsx'
 import { DataRecordsPage } from './records/FilteredModules.jsx'
 import { bootstrapSession, getUser, logout as clearSession, subscribeSessionExpired } from './api.js'
 import AccountsAccess from './accounts/AccountsAccess.jsx'
+import ViewerDashboard from './viewer/ViewerDashboard.jsx'
 import AccountLinkPage from './accounts/AccountLinkPage.jsx'
 import { adminNavigation } from './admin-navigation.js'
 import './App.css'
@@ -49,7 +50,7 @@ function WorkspaceApp(){
   useEffect(()=>subscribeSessionExpired(()=>setUser(null)),[])
   if(checkingSession)return <main className="login"><div className="login-card"><div className="logo">GO</div><p>Session ကို စစ်ဆေးနေသည်...</p></div></main>
   if(!user)return <Login onLogin={setUser}/>
-  if(user.role!=='ADMIN')return <Dashboard published embedded initialAccess={user.role==='VIP_VIEWER'?1:2} viewerUser={user} onLogout={()=>{setUser(null);void clearSession()}}/>
+  if(user.role!=='ADMIN')return <ViewerDashboard user={user} onLogout={()=>{setUser(null);void clearSession()}}/>
   if(presentation)return <Dashboard published={published} onBack={leave}/>
   return <div className="app drawer-shell">
     <aside className="temporary-drawer" aria-label="ပင်မလမ်းညွှန်">
