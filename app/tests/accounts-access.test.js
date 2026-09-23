@@ -1,11 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { accountAccessOptions, accountActionItems } from '../src/accounts/accounts-utils.js'
+import { accountAccessOptions, accountActionItems, accountMenuPosition, runAccountAction } from '../src/accounts/accounts-utils.js'
 import { copyText } from '../src/accounts/copy-text.js'
 
 const source = fs.readFileSync(path.resolve(process.cwd(), 'src/accounts/AccountsAccess.jsx'), 'utf8')
 const linkPageSource = fs.readFileSync(path.resolve(process.cwd(), 'src/accounts/AccountLinkPage.jsx'), 'utf8')
+const enhancementCss = fs.readFileSync(path.resolve(process.cwd(), 'src/accounts/accounts-access-enhancements.css'), 'utf8')
 
 describe('User & Access acceptance UI', () => {
   it('uses the final role labels and assignment order without exposing Main Admin', () => {
@@ -60,6 +61,36 @@ describe('User & Access acceptance UI', () => {
     expect(actionsSource).not.toContain('Cancel Invitation')
     expect(source).toContain('Deactivate this user?')
     expect(source).toContain('will be signed out and cannot log in until this account is reactivated.')
+  })
+
+  it('portals the row menu outside overflow containers and closes it safely', () => {
+    const actionsSource = source.slice(source.indexOf('function AccountActions'), source.indexOf('function AccountDialog'))
+    expect(actionsSource).toContain('createPortal(')
+    expect(actionsSource).toContain('document.body')
+    expect(actionsSource).toContain("document.addEventListener('pointerdown', closeOutside)")
+    expect(actionsSource).toContain("window.addEventListener('resize', close)")
+    expect(actionsSource).toContain("window.addEventListener('scroll', close, true)")
+    expect(enhancementCss).toContain('.account-action-menu-popup{position:fixed')
+    expect(enhancementCss).not.toContain('.account-action-menu>div{position:absolute')
+  })
+
+  it('positions the menu inside the viewport and flips it above bottom rows', () => {
+    const below = accountMenuPosition({ buttonRect: { top: 100, right: 790, bottom: 134 }, menuWidth: 158, menuHeight: 91, viewportWidth: 800, viewportHeight: 700 })
+    expect(below).toMatchObject({ position: 'fixed', left: 632, top: 139, opensUpward: false })
+    const above = accountMenuPosition({ buttonRect: { top: 650, right: 790, bottom: 684 }, menuWidth: 158, menuHeight: 91, viewportWidth: 800, viewportHeight: 700 })
+    expect(above).toMatchObject({ position: 'fixed', left: 632, top: 554, opensUpward: true })
+  })
+
+  it('closes before executing a selected lifecycle callback exactly once', () => {
+    const setOpen = vi.fn()
+    const action = vi.fn()
+    runAccountAction(setOpen, action)
+    expect(setOpen).toHaveBeenCalledOnce()
+    expect(setOpen).toHaveBeenCalledWith(false)
+    expect(action).toHaveBeenCalledOnce()
+    expect(setOpen.mock.invocationCallOrder[0]).toBeLessThan(action.mock.invocationCallOrder[0])
+    const actionsSource = source.slice(source.indexOf('function AccountActions'), source.indexOf('function AccountDialog'))
+    expect(actionsSource.match(/run\(on(?:Reset|Deactivate|Reactivate)\)/g)).toHaveLength(3)
   })
 
   it('validates setup and reset tokens through POST bodies and removes them from browser history', () => {

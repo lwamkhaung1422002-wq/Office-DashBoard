@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../api.js'
-import { accountAccessOptions, accountActionItems } from './accounts-utils.js'
+import { accountAccessOptions, accountActionItems, accountMenuPosition, runAccountAction } from './accounts-utils.js'
 import { copyText } from './copy-text.js'
 import './accounts-access.css'
 import './accounts-access-enhancements.css'
@@ -176,21 +177,60 @@ function RoleOptions({ value, onChange }) {
 
 function AccountActions({ row, onReset, onDeactivate, onReactivate }) {
   const [open, setOpen] = useState(false)
+  const [position, setPosition] = useState(null)
+  const buttonRef = useRef(null)
+  const menuRef = useRef(null)
   const actions = accountActionItems(row)
+
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current || !menuRef.current) return
+    const buttonRect = buttonRef.current.getBoundingClientRect()
+    const menuRect = menuRef.current.getBoundingClientRect()
+    setPosition(accountMenuPosition({
+      buttonRect,
+      menuWidth: menuRect.width,
+      menuHeight: menuRect.height,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    }))
+  }, [open])
+
   useEffect(() => {
     if (!open) return undefined
     const close = () => setOpen(false)
-    window.addEventListener('click', close)
-    return () => window.removeEventListener('click', close)
+    const closeOutside = event => {
+      if (buttonRef.current?.contains(event.target) || menuRef.current?.contains(event.target)) return
+      close()
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', close, true)
+    }
   }, [open])
-  if (row.isPrimaryAdmin) return <span className="protected-note">Protected</span>
+  if (row.isPrimaryAdmin) return <span className="no-actions">—</span>
   if (!actions.length) return <span className="no-actions">—</span>
-  const run = action => { setOpen(false); action() }
-  return <div className="account-action-menu" onClick={event => event.stopPropagation()}>
-    <button className="account-kebab" aria-label={`Actions for ${row.name}`} aria-expanded={open} onClick={() => setOpen(value => !value)}>⋮</button>
-    {open && <div role="menu">{actions[0] === 'Reactivate'
-      ? <button role="menuitem" onClick={() => run(onReactivate)}>Reactivate</button>
-      : <><button role="menuitem" onClick={() => run(onReset)}>Reset Login</button><hr /><button role="menuitem" className="danger" onClick={() => run(onDeactivate)}>Deactivate</button></>}</div>}
+  const run = action => runAccountAction(setOpen, action)
+  const menu = open && typeof document !== 'undefined' && createPortal(
+    <div
+      ref={menuRef}
+      className="account-action-menu-popup"
+      role="menu"
+      data-placement={position?.opensUpward ? 'top' : 'bottom'}
+      style={position ? { left: position.left, top: position.top } : { left: 0, top: 0, visibility: 'hidden' }}
+    >
+      {actions[0] === 'Reactivate'
+        ? <button role="menuitem" onClick={() => run(onReactivate)}>Reactivate</button>
+        : <><button role="menuitem" onClick={() => run(onReset)}>Reset Login</button><hr /><button role="menuitem" className="danger" onClick={() => run(onDeactivate)}>Deactivate</button></>}
+    </div>,
+    document.body,
+  )
+  return <div className="account-action-menu">
+    <button ref={buttonRef} className="account-kebab" aria-label={`Actions for ${row.name}`} aria-expanded={open} onClick={() => setOpen(value => !value)}>⋮</button>
+    {menu}
   </div>
 }
 

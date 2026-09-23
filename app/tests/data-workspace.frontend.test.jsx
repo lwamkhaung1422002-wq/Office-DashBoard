@@ -1,9 +1,14 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { CollectionMenu, ConfirmDialog, DashboardDialog, DataCollectionRow, DataDashboard, DataRecordRow, DataRecordsHeader, DataRecordToolbar, FolderTree, RecordDialog, RecordMenu, WidgetVisualization } from '../src/records/FilteredModules.jsx'
 import { SemanticFileIcon } from '../src/shared/SemanticFileIcon.jsx'
 import { semanticFileType } from '../src/shared/semantic-file-types.js'
 import { archiveDashboardWidget, archiveRecordRequest, clearCollectionContext, createRecordRequest, dataCollectionDetailsRequest, fieldInputType, filterFolderTree, generateRecordTitle, loadCollectionDashboard, previewDashboardWidget, recordQueryParams, reorderDashboardWidgets, saveDashboardWidget, topSeriesWithOthers, updateRecordRequest, widgetFieldChoices, widgetRequestBody } from '../src/records/data-workspace-utils.js'
+
+const workspaceSource = fs.readFileSync(path.resolve(process.cwd(), 'src/records/FilteredModules.jsx'), 'utf8')
+const dashboardCss = fs.readFileSync(path.resolve(process.cwd(), 'src/records/data-dashboard.css'), 'utf8')
 
 describe('Data workspace frontend', () => {
   const tree = [{ id: 'finance', name: 'Finance', children: [{ id: 'budget', name: 'Budget', children: [] }] }, { id: 'hr', name: 'HR', children: [] }]
@@ -115,22 +120,36 @@ describe('Data workspace frontend', () => {
     expect(table).toContain('Add New')
     expect(table).toContain('Table')
     expect(table).toContain('Dashboard')
+    expect(table).toContain('class="data-record-toolbar data-mode-table"')
+    expect(table).not.toContain('data-record-toolbar dashboard')
     expect(table).toContain('မှတ်တမ်းရှာရန်')
     expect(table).not.toContain('Filter')
     expect(table).not.toContain('Export')
     const dashboard = renderToStaticMarkup(<DataRecordToolbar viewMode="dashboard" setViewMode={() => {}} search="" setSearch={() => {}} sort={{ sortBy: 'updatedAt', sortDirection: 'desc' }} setSort={() => {}} customize={false} setCustomize={() => {}} onAddRecord={() => {}} onAddWidget={() => {}} />)
     expect(dashboard).toContain('Add Widget')
     expect(dashboard).toContain('Customize')
+    expect(dashboard).toContain('class="data-record-toolbar data-mode-dashboard"')
+    expect(dashboard).not.toContain('data-record-toolbar dashboard')
     expect(dashboard).not.toContain('မှတ်တမ်းရှာရန်')
     expect(dashboard).not.toContain('Add New')
+    expect(workspaceSource).not.toContain('className={`data-record-toolbar ${viewMode}`}')
+    expect(dashboardCss).toContain('.data-record-toolbar.data-mode-dashboard')
+    expect(dashboardCss).not.toContain('.data-record-toolbar.dashboard')
   })
 
-  it('switches Table to Dashboard through the existing toolbar control', () => {
+  it('switches between Table and Dashboard and preserves Add Widget', () => {
     const setViewMode = vi.fn()
     const toolbar = DataRecordToolbar({ viewMode: 'table', setViewMode, search: '', setSearch: vi.fn(), sort: { sortBy: 'updatedAt', sortDirection: 'desc' }, setSort: vi.fn(), customize: false, setCustomize: vi.fn(), onAddRecord: vi.fn(), onAddWidget: vi.fn() })
     const viewSwitch = toolbar.props.children[0].props.children[1]
     viewSwitch.props.children[1].props.onClick()
     expect(setViewMode).toHaveBeenCalledWith('dashboard')
+    const onAddWidget = vi.fn()
+    const dashboardToolbar = DataRecordToolbar({ viewMode: 'dashboard', setViewMode, search: '', setSearch: vi.fn(), sort: { sortBy: 'updatedAt', sortDirection: 'desc' }, setSort: vi.fn(), customize: false, setCustomize: vi.fn(), onAddRecord: vi.fn(), onAddWidget })
+    const dashboardSwitch = dashboardToolbar.props.children[0].props.children[1]
+    dashboardSwitch.props.children[0].props.onClick()
+    expect(setViewMode).toHaveBeenCalledWith('table')
+    dashboardToolbar.props.children[1].props.children[0].props.onClick()
+    expect(onAddWidget).toHaveBeenCalledOnce()
   })
 
   it('renders the dashboard empty state and configured KPI, Pie, Bar, and Line widgets', () => {
